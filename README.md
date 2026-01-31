@@ -5,6 +5,8 @@ A simple space shooter game built with Pygame. This is a learning project demons
 ## Features
 
 - Player ship with left/right movement
+- Asteroids that spawn and fly toward the player
+- Collision detection with game over state
 - Clean game loop with consistent frame rate
 
 ## Requirements
@@ -41,6 +43,7 @@ python main.py
 
 - **Left Arrow**: Move left
 - **Right Arrow**: Move right
+- **R**: Restart after game over
 - **ESC**: Quit game
 
 ## Project Structure

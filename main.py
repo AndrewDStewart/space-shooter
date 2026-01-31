@@ -29,6 +29,8 @@ DARK_GRAY = (100, 100, 100)
 LIGHT_GRAY = (200, 200, 200)
 RED = (255, 50, 50)
 YELLOW = (255, 255, 100)
+BROWN = (139, 90, 43)
+DARK_BROWN = (101, 67, 33)
 
 # Player settings
 PLAYER_WIDTH = 50
@@ -49,6 +51,18 @@ ASTEROID_SIZES = {
 }
 ASTEROID_SPEED = 4
 ASTEROID_SPAWN_RATE = 60  # Frames between spawns
+
+# Slow obstacle settings (barricades and giant asteroids)
+OBSTACLE_SPEED = 2  # Half speed of regular asteroids
+OBSTACLE_SPAWN_RATE = 180  # Less frequent than asteroids
+
+# Barricade settings (wide but short walls)
+BARRICADE_WIDTH = 64
+BARRICADE_HEIGHT = 16
+
+# Giant asteroid settings
+GIANT_ASTEROID_SIZE = 128
+GIANT_ASTEROID_HEALTH = 8  # Takes many hits
 
 
 def draw_player(surface, x, y):
@@ -144,6 +158,95 @@ def draw_asteroid(surface, asteroid):
             pygame.draw.line(surface, BLACK, crack_start, crack_end, 2)
 
 
+def create_barricade():
+    """Create a barricade (wide wall) at a random x position."""
+    x = random.randint(0, SCREEN_WIDTH - BARRICADE_WIDTH)
+    return {
+        "type": "barricade",
+        "x": x,
+        "y": -BARRICADE_HEIGHT,
+        "width": BARRICADE_WIDTH,
+        "height": BARRICADE_HEIGHT,
+    }
+
+
+def draw_barricade(surface, barricade):
+    """Draw a barricade as a metallic wall segment."""
+    x, y = barricade["x"], barricade["y"]
+    w, h = barricade["width"], barricade["height"]
+
+    # Main body
+    pygame.draw.rect(surface, BROWN, (x, y, w, h))
+
+    # Metal rivets/details
+    rivet_spacing = 12
+    for rx in range(x + 6, x + w - 6, rivet_spacing):
+        pygame.draw.circle(surface, DARK_BROWN, (rx, y + h // 2), 3)
+
+    # Outline
+    pygame.draw.rect(surface, WHITE, (x, y, w, h), 2)
+
+
+def create_giant_asteroid():
+    """Create a giant asteroid at a random x position."""
+    x = random.randint(0, SCREEN_WIDTH - GIANT_ASTEROID_SIZE)
+    return {
+        "type": "giant_asteroid",
+        "x": x,
+        "y": -GIANT_ASTEROID_SIZE,
+        "size": GIANT_ASTEROID_SIZE,
+        "health": GIANT_ASTEROID_HEALTH,
+        "max_health": GIANT_ASTEROID_HEALTH,
+    }
+
+
+def draw_giant_asteroid(surface, asteroid):
+    """Draw a giant asteroid as a large rocky sphere."""
+    x, y, size = asteroid["x"], asteroid["y"], asteroid["size"]
+    center_x = x + size // 2
+    center_y = y + size // 2
+    radius = size // 2 - 4
+
+    # Main body (irregular circle)
+    points = []
+    num_points = 12
+    for i in range(num_points):
+        angle = i * (360 / num_points)
+        point_radius = radius - random.randint(0, radius // 6)
+        px = center_x + point_radius * pygame.math.Vector2(1, 0).rotate(angle).x
+        py = center_y + point_radius * pygame.math.Vector2(1, 0).rotate(angle).y
+        points.append((px, py))
+
+    pygame.draw.polygon(surface, DARK_GRAY, points)
+    pygame.draw.polygon(surface, WHITE, points, 3)  # Thicker outline
+
+    # Crater details
+    for _ in range(3):
+        crater_x = center_x + random.randint(-radius//2, radius//2)
+        crater_y = center_y + random.randint(-radius//2, radius//2)
+        crater_r = random.randint(8, 15)
+        pygame.draw.circle(surface, GRAY, (crater_x, crater_y), crater_r)
+        pygame.draw.circle(surface, DARK_GRAY, (crater_x, crater_y), crater_r, 2)
+
+    # Show damage with cracks
+    damage_taken = asteroid["max_health"] - asteroid["health"]
+    if damage_taken > 0:
+        for i in range(min(damage_taken, 6)):  # Cap visual cracks
+            crack_start = (center_x + random.randint(-radius//2, radius//2),
+                          center_y + random.randint(-radius//2, radius//2))
+            crack_end = (center_x + random.randint(-radius//2, radius//2),
+                        center_y + random.randint(-radius//2, radius//2))
+            pygame.draw.line(surface, BLACK, crack_start, crack_end, 3)
+
+
+def create_slow_obstacle():
+    """Create either a barricade or giant asteroid."""
+    if random.random() < 0.5:
+        return create_barricade()
+    else:
+        return create_giant_asteroid()
+
+
 def get_player_rect(player_x, player_y):
     """Get a slightly smaller hitbox for the player (more forgiving collisions)."""
     margin = 8
@@ -163,38 +266,81 @@ def get_asteroid_rect(asteroid):
     )
 
 
-def check_player_collision(player_x, player_y, asteroids):
-    """Check if the player collides with any asteroid."""
+def get_obstacle_rect(obstacle):
+    """Get the hitbox for any obstacle type."""
+    if obstacle["type"] == "barricade":
+        return pygame.Rect(
+            obstacle["x"], obstacle["y"],
+            obstacle["width"], obstacle["height"]
+        )
+    else:  # giant_asteroid
+        return pygame.Rect(
+            obstacle["x"], obstacle["y"],
+            obstacle["size"], obstacle["size"]
+        )
+
+
+def check_player_collision(player_x, player_y, asteroids, obstacles):
+    """Check if the player collides with any asteroid or obstacle."""
     player_rect = get_player_rect(player_x, player_y)
+
+    # Check regular asteroids
     for asteroid in asteroids:
         if player_rect.colliderect(get_asteroid_rect(asteroid)):
             return True
+
+    # Check slow obstacles
+    for obstacle in obstacles:
+        if player_rect.colliderect(get_obstacle_rect(obstacle)):
+            return True
+
     return False
 
 
-def check_bullet_collisions(bullets, asteroids):
-    """Check for bullet-asteroid collisions. Returns updated lists."""
+def check_bullet_collisions(bullets, asteroids, obstacles):
+    """Check for bullet collisions with asteroids and obstacles. Returns updated lists."""
     bullets_to_remove = []
     asteroids_to_remove = []
+    obstacles_to_remove = []
 
     for bullet in bullets:
         bullet_rect = pygame.Rect(
             bullet["x"], bullet["y"],
             BULLET_WIDTH, BULLET_HEIGHT
         )
+
+        hit = False
+
+        # Check regular asteroids
         for asteroid in asteroids:
             if bullet_rect.colliderect(get_asteroid_rect(asteroid)):
                 bullets_to_remove.append(bullet)
                 asteroid["health"] -= 1
                 if asteroid["health"] <= 0:
                     asteroids_to_remove.append(asteroid)
-                break  # Bullet can only hit one asteroid
+                hit = True
+                break
 
-    # Remove destroyed bullets and asteroids
+        if hit:
+            continue
+
+        # Check slow obstacles (only giant asteroids can be damaged)
+        for obstacle in obstacles:
+            if bullet_rect.colliderect(get_obstacle_rect(obstacle)):
+                bullets_to_remove.append(bullet)
+                if obstacle["type"] == "giant_asteroid":
+                    obstacle["health"] -= 1
+                    if obstacle["health"] <= 0:
+                        obstacles_to_remove.append(obstacle)
+                # Barricades are indestructible - bullet just disappears
+                break
+
+    # Remove destroyed items
     new_bullets = [b for b in bullets if b not in bullets_to_remove]
     new_asteroids = [a for a in asteroids if a not in asteroids_to_remove]
+    new_obstacles = [o for o in obstacles if o not in obstacles_to_remove]
 
-    return new_bullets, new_asteroids
+    return new_bullets, new_asteroids, new_obstacles
 
 
 def draw_game_over(surface):
@@ -220,11 +366,14 @@ def reset_game():
     player_x = SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2
     player_y = SCREEN_HEIGHT - PLAYER_HEIGHT - 20
     asteroids = []
+    obstacles = []  # Slow obstacles (barricades, giant asteroids)
     bullets = []
-    spawn_timer = 0
+    asteroid_spawn_timer = 0
+    obstacle_spawn_timer = 0
     shoot_cooldown = 0
     game_over = False
-    return player_x, player_y, asteroids, bullets, spawn_timer, shoot_cooldown, game_over
+    return (player_x, player_y, asteroids, obstacles, bullets,
+            asteroid_spawn_timer, obstacle_spawn_timer, shoot_cooldown, game_over)
 
 
 def main():
@@ -235,7 +384,8 @@ def main():
     clock = pygame.time.Clock()
 
     # Initialize game state
-    player_x, player_y, asteroids, bullets, spawn_timer, shoot_cooldown, game_over = reset_game()
+    (player_x, player_y, asteroids, obstacles, bullets,
+     asteroid_spawn_timer, obstacle_spawn_timer, shoot_cooldown, game_over) = reset_game()
 
     # Game loop
     running = True
@@ -249,7 +399,8 @@ def main():
                     running = False
                 elif event.key == pygame.K_r and game_over:
                     # Restart the game
-                    player_x, player_y, asteroids, bullets, spawn_timer, shoot_cooldown, game_over = reset_game()
+                    (player_x, player_y, asteroids, obstacles, bullets,
+                     asteroid_spawn_timer, obstacle_spawn_timer, shoot_cooldown, game_over) = reset_game()
 
         if not game_over:
             # Handle continuous key presses for movement and shooting
@@ -275,28 +426,39 @@ def main():
                 player_x = SCREEN_WIDTH - PLAYER_WIDTH
 
             # Spawn new asteroids
-            spawn_timer += 1
-            if spawn_timer >= ASTEROID_SPAWN_RATE:
+            asteroid_spawn_timer += 1
+            if asteroid_spawn_timer >= ASTEROID_SPAWN_RATE:
                 asteroids.append(create_asteroid())
-                spawn_timer = 0
+                asteroid_spawn_timer = 0
 
-            # Move asteroids down
+            # Spawn slow obstacles (barricades, giant asteroids)
+            obstacle_spawn_timer += 1
+            if obstacle_spawn_timer >= OBSTACLE_SPAWN_RATE:
+                obstacles.append(create_slow_obstacle())
+                obstacle_spawn_timer = 0
+
+            # Move asteroids down (normal speed)
             for asteroid in asteroids:
                 asteroid["y"] += ASTEROID_SPEED
+
+            # Move slow obstacles down (half speed)
+            for obstacle in obstacles:
+                obstacle["y"] += OBSTACLE_SPEED
 
             # Move bullets up
             for bullet in bullets:
                 bullet["y"] -= BULLET_SPEED
 
-            # Remove asteroids and bullets that have moved off screen
+            # Remove objects that have moved off screen
             asteroids = [a for a in asteroids if a["y"] < SCREEN_HEIGHT]
+            obstacles = [o for o in obstacles if o["y"] < SCREEN_HEIGHT]
             bullets = [b for b in bullets if b["y"] > -BULLET_HEIGHT]
 
-            # Check bullet-asteroid collisions
-            bullets, asteroids = check_bullet_collisions(bullets, asteroids)
+            # Check bullet collisions
+            bullets, asteroids, obstacles = check_bullet_collisions(bullets, asteroids, obstacles)
 
-            # Check for player-asteroid collisions
-            if check_player_collision(player_x, player_y, asteroids):
+            # Check for player collisions
+            if check_player_collision(player_x, player_y, asteroids, obstacles):
                 game_over = True
 
         # Draw everything
@@ -305,6 +467,14 @@ def main():
         # Draw bullets
         for bullet in bullets:
             draw_bullet(screen, bullet)
+
+        # Draw slow obstacles (use fixed seed for consistent shape)
+        for obstacle in obstacles:
+            random.seed(id(obstacle))
+            if obstacle["type"] == "barricade":
+                draw_barricade(screen, obstacle)
+            else:
+                draw_giant_asteroid(screen, obstacle)
 
         # Draw asteroids (use fixed seed per asteroid for consistent shape)
         for asteroid in asteroids:

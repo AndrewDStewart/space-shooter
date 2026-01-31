@@ -8,6 +8,9 @@ A simple space shooter game built with Pygame. Designed for mobile (9:16 portrai
 - Shooting mechanics (spacebar to fire)
 - Three asteroid sizes (small, medium, large) with different health
 - Asteroids take 1-3 hits to destroy based on size
+- Slow obstacles that require navigation:
+  - Barricades (indestructible walls)
+  - Giant asteroids (128px, 8 hits to destroy)
 - Collision detection with game over state
 - Clean game loop with consistent frame rate
 

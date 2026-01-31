@@ -6,6 +6,7 @@ Controls:
     Space: Shoot
     ESC: Quit game
     R: Restart after game over
+    F: Toggle FPS display
 """
 
 import pygame
@@ -31,468 +32,448 @@ RED = (255, 50, 50)
 YELLOW = (255, 255, 100)
 BROWN = (139, 90, 43)
 DARK_BROWN = (101, 67, 33)
+GREEN = (50, 255, 50)
 
 # Player settings
 PLAYER_WIDTH = 50
 PLAYER_HEIGHT = 40
 PLAYER_SPEED = 7
+PLAYER_HITBOX_MARGIN = 8
 
 # Bullet settings
 BULLET_WIDTH = 6
 BULLET_HEIGHT = 15
 BULLET_SPEED = 10
-BULLET_COOLDOWN = 15  # Frames between shots
+BULLET_COOLDOWN = 15
 
-# Asteroid settings - three distinct sizes
+# Asteroid settings
 ASTEROID_SIZES = {
     "small": {"size": 32, "health": 1, "color": LIGHT_GRAY},
     "medium": {"size": 48, "health": 2, "color": GRAY},
     "large": {"size": 64, "health": 3, "color": DARK_GRAY},
 }
 ASTEROID_SPEED = 4
-ASTEROID_SPAWN_RATE = 60  # Frames between spawns
+ASTEROID_SPAWN_RATE = 60
 
-# Slow obstacle settings (barricades and giant asteroids)
-OBSTACLE_SPEED = 2  # Half speed of regular asteroids
-OBSTACLE_SPAWN_RATE = 180  # Less frequent than asteroids
+# Slow obstacle settings
+OBSTACLE_SPEED = 2
+OBSTACLE_SPAWN_RATE = 180
 
-# Barricade settings (wide but short walls)
+# Barricade settings
 BARRICADE_WIDTH = 64
 BARRICADE_HEIGHT = 16
 
 # Giant asteroid settings
 GIANT_ASTEROID_SIZE = 128
-GIANT_ASTEROID_HEALTH = 8  # Takes many hits
+GIANT_ASTEROID_HEALTH = 8
 
 
-def draw_player(surface, x, y):
-    """Draw the player ship as a simple triangle."""
-    # Ship body (triangle pointing up)
-    points = [
-        (x + PLAYER_WIDTH // 2, y),  # Top point
-        (x, y + PLAYER_HEIGHT),       # Bottom left
-        (x + PLAYER_WIDTH, y + PLAYER_HEIGHT)  # Bottom right
-    ]
-    pygame.draw.polygon(surface, BLUE, points)
+# --- Sprite Classes ---
 
-    # Cockpit detail
-    pygame.draw.circle(
-        surface,
-        WHITE,
-        (x + PLAYER_WIDTH // 2, y + PLAYER_HEIGHT // 2 + 5),
-        8
-    )
+class Player(pygame.sprite.Sprite):
+    """Player ship sprite."""
 
+    def __init__(self):
+        super().__init__()
+        # Pre-render the player image
+        self.image = pygame.Surface((PLAYER_WIDTH, PLAYER_HEIGHT), pygame.SRCALPHA)
+        self._draw_ship()
+        self.rect = self.image.get_rect()
+        self.rect.centerx = SCREEN_WIDTH // 2
+        self.rect.bottom = SCREEN_HEIGHT - 20
+        # Smaller hitbox for forgiving collisions
+        self.hitbox = self.rect.inflate(-PLAYER_HITBOX_MARGIN * 2, -PLAYER_HITBOX_MARGIN * 2)
+        self.shoot_cooldown = 0
 
-def create_bullet(player_x, player_y):
-    """Create a new bullet at the player's position."""
-    return {
-        "x": player_x + PLAYER_WIDTH // 2 - BULLET_WIDTH // 2,
-        "y": player_y,
-    }
+    def _draw_ship(self):
+        """Draw the ship onto the sprite's surface."""
+        points = [
+            (PLAYER_WIDTH // 2, 0),
+            (0, PLAYER_HEIGHT),
+            (PLAYER_WIDTH, PLAYER_HEIGHT)
+        ]
+        pygame.draw.polygon(self.image, BLUE, points)
+        pygame.draw.circle(self.image, WHITE, (PLAYER_WIDTH // 2, PLAYER_HEIGHT // 2 + 5), 8)
 
+    def update(self, keys):
+        """Update player position based on input."""
+        if keys[pygame.K_LEFT]:
+            self.rect.x -= PLAYER_SPEED
+        if keys[pygame.K_RIGHT]:
+            self.rect.x += PLAYER_SPEED
 
-def draw_bullet(surface, bullet):
-    """Draw a bullet as a yellow rectangle."""
-    pygame.draw.rect(
-        surface,
-        YELLOW,
-        (bullet["x"], bullet["y"], BULLET_WIDTH, BULLET_HEIGHT)
-    )
+        # Keep within bounds
+        self.rect.clamp_ip(pygame.Rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.hitbox.center = self.rect.center
 
+        # Cooldown timer
+        if self.shoot_cooldown > 0:
+            self.shoot_cooldown -= 1
 
-def create_asteroid():
-    """Create a new asteroid at a random x position at the top of the screen."""
-    # Randomly choose asteroid size with weighted probability
-    size_type = random.choices(
-        ["small", "medium", "large"],
-        weights=[50, 35, 15],  # Small more common, large rare
-        k=1
-    )[0]
+    def can_shoot(self):
+        return self.shoot_cooldown <= 0
 
-    size_data = ASTEROID_SIZES[size_type]
-    size = size_data["size"]
-    x = random.randint(0, SCREEN_WIDTH - size)
-
-    return {
-        "x": x,
-        "y": -size,
-        "size": size,
-        "size_type": size_type,
-        "health": size_data["health"],
-        "max_health": size_data["health"],
-        "color": size_data["color"],
-    }
+    def shoot(self):
+        self.shoot_cooldown = BULLET_COOLDOWN
+        return Bullet(self.rect.centerx, self.rect.top)
 
 
-def draw_asteroid(surface, asteroid):
-    """Draw an asteroid as a rough spherical shape."""
-    x, y, size = asteroid["x"], asteroid["y"], asteroid["size"]
-    center_x = x + size // 2
-    center_y = y + size // 2
-    radius = size // 2 - 2
+class Bullet(pygame.sprite.Sprite):
+    """Bullet sprite."""
 
-    # Main body (slightly irregular circle using polygon)
-    points = []
-    num_points = 10
-    for i in range(num_points):
-        angle = i * (360 / num_points)
-        # Slight variation in radius for rocky look
-        point_radius = radius - random.randint(0, radius // 5)
-        px = center_x + point_radius * pygame.math.Vector2(1, 0).rotate(angle).x
-        py = center_y + point_radius * pygame.math.Vector2(1, 0).rotate(angle).y
-        points.append((px, py))
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((BULLET_WIDTH, BULLET_HEIGHT))
+        self.image.fill(YELLOW)
+        self.rect = self.image.get_rect(centerx=x, bottom=y)
 
-    pygame.draw.polygon(surface, asteroid["color"], points)
-    pygame.draw.polygon(surface, WHITE, points, 2)  # Outline
-
-    # Show damage with cracks (darker lines) based on health
-    damage_taken = asteroid["max_health"] - asteroid["health"]
-    if damage_taken > 0:
-        # Draw crack lines to show damage
-        for i in range(damage_taken):
-            crack_start = (center_x + random.randint(-radius//2, radius//2),
-                          center_y + random.randint(-radius//2, radius//2))
-            crack_end = (center_x + random.randint(-radius//2, radius//2),
-                        center_y + random.randint(-radius//2, radius//2))
-            pygame.draw.line(surface, BLACK, crack_start, crack_end, 2)
+    def update(self):
+        self.rect.y -= BULLET_SPEED
+        if self.rect.bottom < 0:
+            self.kill()
 
 
-def create_barricade():
-    """Create a barricade (wide wall) at a random x position."""
-    x = random.randint(0, SCREEN_WIDTH - BARRICADE_WIDTH)
-    return {
-        "type": "barricade",
-        "x": x,
-        "y": -BARRICADE_HEIGHT,
-        "width": BARRICADE_WIDTH,
-        "height": BARRICADE_HEIGHT,
-    }
+class Asteroid(pygame.sprite.Sprite):
+    """Regular asteroid sprite (small, medium, large)."""
 
+    def __init__(self, size_type=None):
+        super().__init__()
 
-def draw_barricade(surface, barricade):
-    """Draw a barricade as a metallic wall segment."""
-    x, y = barricade["x"], barricade["y"]
-    w, h = barricade["width"], barricade["height"]
+        # Choose size randomly if not specified
+        if size_type is None:
+            size_type = random.choices(
+                ["small", "medium", "large"],
+                weights=[50, 35, 15],
+                k=1
+            )[0]
 
-    # Main body
-    pygame.draw.rect(surface, BROWN, (x, y, w, h))
+        size_data = ASTEROID_SIZES[size_type]
+        self.size = size_data["size"]
+        self.health = size_data["health"]
+        self.max_health = size_data["health"]
+        self.color = size_data["color"]
+        self.speed = ASTEROID_SPEED
 
-    # Metal rivets/details
-    rivet_spacing = 12
-    for rx in range(x + 6, x + w - 6, rivet_spacing):
-        pygame.draw.circle(surface, DARK_BROWN, (rx, y + h // 2), 3)
+        # Pre-render the asteroid shape
+        self.base_image = self._create_asteroid_surface()
+        self.image = self.base_image.copy()
+        self.rect = self.image.get_rect()
+        self.rect.x = random.randint(0, SCREEN_WIDTH - self.size)
+        self.rect.bottom = 0
 
-    # Outline
-    pygame.draw.rect(surface, WHITE, (x, y, w, h), 2)
+    def _create_asteroid_surface(self):
+        """Pre-render asteroid shape to a surface."""
+        surface = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        center = self.size // 2
+        radius = self.size // 2 - 2
 
+        # Generate irregular polygon points once
+        points = []
+        num_points = 10
+        for i in range(num_points):
+            angle = i * (360 / num_points)
+            point_radius = radius - random.randint(0, radius // 5)
+            px = center + point_radius * pygame.math.Vector2(1, 0).rotate(angle).x
+            py = center + point_radius * pygame.math.Vector2(1, 0).rotate(angle).y
+            points.append((px, py))
 
-def create_giant_asteroid():
-    """Create a giant asteroid at a random x position."""
-    x = random.randint(0, SCREEN_WIDTH - GIANT_ASTEROID_SIZE)
-    return {
-        "type": "giant_asteroid",
-        "x": x,
-        "y": -GIANT_ASTEROID_SIZE,
-        "size": GIANT_ASTEROID_SIZE,
-        "health": GIANT_ASTEROID_HEALTH,
-        "max_health": GIANT_ASTEROID_HEALTH,
-    }
+        pygame.draw.polygon(surface, self.color, points)
+        pygame.draw.polygon(surface, WHITE, points, 2)
+        return surface
 
+    def _add_damage_cracks(self):
+        """Add crack effects based on damage taken."""
+        self.image = self.base_image.copy()
+        damage = self.max_health - self.health
+        center = self.size // 2
+        radius = self.size // 2 - 2
 
-def draw_giant_asteroid(surface, asteroid):
-    """Draw a giant asteroid as a large rocky sphere."""
-    x, y, size = asteroid["x"], asteroid["y"], asteroid["size"]
-    center_x = x + size // 2
-    center_y = y + size // 2
-    radius = size // 2 - 4
+        for _ in range(damage):
+            crack_start = (center + random.randint(-radius//2, radius//2),
+                          center + random.randint(-radius//2, radius//2))
+            crack_end = (center + random.randint(-radius//2, radius//2),
+                        center + random.randint(-radius//2, radius//2))
+            pygame.draw.line(self.image, BLACK, crack_start, crack_end, 2)
 
-    # Main body (irregular circle)
-    points = []
-    num_points = 12
-    for i in range(num_points):
-        angle = i * (360 / num_points)
-        point_radius = radius - random.randint(0, radius // 6)
-        px = center_x + point_radius * pygame.math.Vector2(1, 0).rotate(angle).x
-        py = center_y + point_radius * pygame.math.Vector2(1, 0).rotate(angle).y
-        points.append((px, py))
-
-    pygame.draw.polygon(surface, DARK_GRAY, points)
-    pygame.draw.polygon(surface, WHITE, points, 3)  # Thicker outline
-
-    # Crater details
-    for _ in range(3):
-        crater_x = center_x + random.randint(-radius//2, radius//2)
-        crater_y = center_y + random.randint(-radius//2, radius//2)
-        crater_r = random.randint(8, 15)
-        pygame.draw.circle(surface, GRAY, (crater_x, crater_y), crater_r)
-        pygame.draw.circle(surface, DARK_GRAY, (crater_x, crater_y), crater_r, 2)
-
-    # Show damage with cracks
-    damage_taken = asteroid["max_health"] - asteroid["health"]
-    if damage_taken > 0:
-        for i in range(min(damage_taken, 6)):  # Cap visual cracks
-            crack_start = (center_x + random.randint(-radius//2, radius//2),
-                          center_y + random.randint(-radius//2, radius//2))
-            crack_end = (center_x + random.randint(-radius//2, radius//2),
-                        center_y + random.randint(-radius//2, radius//2))
-            pygame.draw.line(surface, BLACK, crack_start, crack_end, 3)
-
-
-def create_slow_obstacle():
-    """Create either a barricade or giant asteroid."""
-    if random.random() < 0.5:
-        return create_barricade()
-    else:
-        return create_giant_asteroid()
-
-
-def get_player_rect(player_x, player_y):
-    """Get a slightly smaller hitbox for the player (more forgiving collisions)."""
-    margin = 8
-    return pygame.Rect(
-        player_x + margin,
-        player_y + margin,
-        PLAYER_WIDTH - margin * 2,
-        PLAYER_HEIGHT - margin * 2
-    )
-
-
-def get_asteroid_rect(asteroid):
-    """Get the hitbox for an asteroid."""
-    return pygame.Rect(
-        asteroid["x"], asteroid["y"],
-        asteroid["size"], asteroid["size"]
-    )
-
-
-def get_obstacle_rect(obstacle):
-    """Get the hitbox for any obstacle type."""
-    if obstacle["type"] == "barricade":
-        return pygame.Rect(
-            obstacle["x"], obstacle["y"],
-            obstacle["width"], obstacle["height"]
-        )
-    else:  # giant_asteroid
-        return pygame.Rect(
-            obstacle["x"], obstacle["y"],
-            obstacle["size"], obstacle["size"]
-        )
-
-
-def check_player_collision(player_x, player_y, asteroids, obstacles):
-    """Check if the player collides with any asteroid or obstacle."""
-    player_rect = get_player_rect(player_x, player_y)
-
-    # Check regular asteroids
-    for asteroid in asteroids:
-        if player_rect.colliderect(get_asteroid_rect(asteroid)):
+    def take_damage(self):
+        """Take one point of damage. Returns True if destroyed."""
+        self.health -= 1
+        if self.health <= 0:
+            self.kill()
             return True
+        self._add_damage_cracks()
+        return False
 
-    # Check slow obstacles
-    for obstacle in obstacles:
-        if player_rect.colliderect(get_obstacle_rect(obstacle)):
+    def update(self):
+        self.rect.y += self.speed
+        if self.rect.top > SCREEN_HEIGHT:
+            self.kill()
+
+
+class Barricade(pygame.sprite.Sprite):
+    """Indestructible wall obstacle."""
+
+    def __init__(self):
+        super().__init__()
+        self.image = pygame.Surface((BARRICADE_WIDTH, BARRICADE_HEIGHT))
+        self._draw_barricade()
+        self.rect = self.image.get_rect()
+        self.rect.x = random.randint(0, SCREEN_WIDTH - BARRICADE_WIDTH)
+        self.rect.bottom = 0
+        self.indestructible = True
+
+    def _draw_barricade(self):
+        """Pre-render barricade."""
+        self.image.fill(BROWN)
+        # Metal rivets
+        for rx in range(6, BARRICADE_WIDTH - 6, 12):
+            pygame.draw.circle(self.image, DARK_BROWN, (rx, BARRICADE_HEIGHT // 2), 3)
+        pygame.draw.rect(self.image, WHITE, (0, 0, BARRICADE_WIDTH, BARRICADE_HEIGHT), 2)
+
+    def update(self):
+        self.rect.y += OBSTACLE_SPEED
+        if self.rect.top > SCREEN_HEIGHT:
+            self.kill()
+
+
+class GiantAsteroid(pygame.sprite.Sprite):
+    """Large slow-moving asteroid."""
+
+    def __init__(self):
+        super().__init__()
+        self.size = GIANT_ASTEROID_SIZE
+        self.health = GIANT_ASTEROID_HEALTH
+        self.max_health = GIANT_ASTEROID_HEALTH
+        self.indestructible = False
+
+        self.base_image = self._create_surface()
+        self.image = self.base_image.copy()
+        self.rect = self.image.get_rect()
+        self.rect.x = random.randint(0, SCREEN_WIDTH - self.size)
+        self.rect.bottom = 0
+
+    def _create_surface(self):
+        """Pre-render giant asteroid."""
+        surface = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        center = self.size // 2
+        radius = self.size // 2 - 4
+
+        # Irregular circle
+        points = []
+        for i in range(12):
+            angle = i * (360 / 12)
+            point_radius = radius - random.randint(0, radius // 6)
+            px = center + point_radius * pygame.math.Vector2(1, 0).rotate(angle).x
+            py = center + point_radius * pygame.math.Vector2(1, 0).rotate(angle).y
+            points.append((px, py))
+
+        pygame.draw.polygon(surface, DARK_GRAY, points)
+        pygame.draw.polygon(surface, WHITE, points, 3)
+
+        # Craters
+        for _ in range(3):
+            cx = center + random.randint(-radius//2, radius//2)
+            cy = center + random.randint(-radius//2, radius//2)
+            cr = random.randint(8, 15)
+            pygame.draw.circle(surface, GRAY, (cx, cy), cr)
+            pygame.draw.circle(surface, DARK_GRAY, (cx, cy), cr, 2)
+
+        return surface
+
+    def _add_damage_cracks(self):
+        """Add crack effects based on damage taken."""
+        self.image = self.base_image.copy()
+        damage = self.max_health - self.health
+        center = self.size // 2
+        radius = self.size // 2 - 4
+
+        for _ in range(min(damage, 6)):
+            crack_start = (center + random.randint(-radius//2, radius//2),
+                          center + random.randint(-radius//2, radius//2))
+            crack_end = (center + random.randint(-radius//2, radius//2),
+                        center + random.randint(-radius//2, radius//2))
+            pygame.draw.line(self.image, BLACK, crack_start, crack_end, 3)
+
+    def take_damage(self):
+        """Take one point of damage. Returns True if destroyed."""
+        self.health -= 1
+        if self.health <= 0:
+            self.kill()
             return True
+        self._add_damage_cracks()
+        return False
 
-    return False
-
-
-def check_bullet_collisions(bullets, asteroids, obstacles):
-    """Check for bullet collisions with asteroids and obstacles. Returns updated lists."""
-    bullets_to_remove = []
-    asteroids_to_remove = []
-    obstacles_to_remove = []
-
-    for bullet in bullets:
-        bullet_rect = pygame.Rect(
-            bullet["x"], bullet["y"],
-            BULLET_WIDTH, BULLET_HEIGHT
-        )
-
-        hit = False
-
-        # Check regular asteroids
-        for asteroid in asteroids:
-            if bullet_rect.colliderect(get_asteroid_rect(asteroid)):
-                bullets_to_remove.append(bullet)
-                asteroid["health"] -= 1
-                if asteroid["health"] <= 0:
-                    asteroids_to_remove.append(asteroid)
-                hit = True
-                break
-
-        if hit:
-            continue
-
-        # Check slow obstacles (only giant asteroids can be damaged)
-        for obstacle in obstacles:
-            if bullet_rect.colliderect(get_obstacle_rect(obstacle)):
-                bullets_to_remove.append(bullet)
-                if obstacle["type"] == "giant_asteroid":
-                    obstacle["health"] -= 1
-                    if obstacle["health"] <= 0:
-                        obstacles_to_remove.append(obstacle)
-                # Barricades are indestructible - bullet just disappears
-                break
-
-    # Remove destroyed items
-    new_bullets = [b for b in bullets if b not in bullets_to_remove]
-    new_asteroids = [a for a in asteroids if a not in asteroids_to_remove]
-    new_obstacles = [o for o in obstacles if o not in obstacles_to_remove]
-
-    return new_bullets, new_asteroids, new_obstacles
+    def update(self):
+        self.rect.y += OBSTACLE_SPEED
+        if self.rect.top > SCREEN_HEIGHT:
+            self.kill()
 
 
-def draw_game_over(surface):
-    """Draw the game over screen."""
-    font_large = pygame.font.Font(None, 64)
-    font_small = pygame.font.Font(None, 28)
+# --- Game Class ---
 
-    game_over_text = font_large.render("GAME OVER", True, RED)
-    restart_text = font_small.render("Press R to restart", True, WHITE)
+class Game:
+    """Main game class managing all state and logic."""
 
-    surface.blit(
-        game_over_text,
-        (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2, SCREEN_HEIGHT // 2 - 50)
-    )
-    surface.blit(
-        restart_text,
-        (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, SCREEN_HEIGHT // 2 + 20)
-    )
+    def __init__(self):
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("Space Shooter")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.Font(None, 28)
+        self.font_large = pygame.font.Font(None, 64)
+        self.show_fps = True
+        self.reset()
 
+    def reset(self):
+        """Reset game state for a new game."""
+        # Sprite groups
+        self.all_sprites = pygame.sprite.Group()
+        self.bullets = pygame.sprite.Group()
+        self.asteroids = pygame.sprite.Group()
+        self.obstacles = pygame.sprite.Group()
 
-def reset_game():
-    """Reset all game state for a new game."""
-    player_x = SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2
-    player_y = SCREEN_HEIGHT - PLAYER_HEIGHT - 20
-    asteroids = []
-    obstacles = []  # Slow obstacles (barricades, giant asteroids)
-    bullets = []
-    asteroid_spawn_timer = 0
-    obstacle_spawn_timer = 0
-    shoot_cooldown = 0
-    game_over = False
-    return (player_x, player_y, asteroids, obstacles, bullets,
-            asteroid_spawn_timer, obstacle_spawn_timer, shoot_cooldown, game_over)
+        # Player
+        self.player = Player()
+        self.all_sprites.add(self.player)
+
+        # Timers
+        self.asteroid_timer = 0
+        self.obstacle_timer = 0
+
+        # State
+        self.game_over = False
+
+    def spawn_asteroid(self):
+        """Spawn a new asteroid."""
+        asteroid = Asteroid()
+        self.asteroids.add(asteroid)
+        self.all_sprites.add(asteroid)
+
+    def spawn_obstacle(self):
+        """Spawn a barricade or giant asteroid."""
+        if random.random() < 0.5:
+            obstacle = Barricade()
+        else:
+            obstacle = GiantAsteroid()
+        self.obstacles.add(obstacle)
+        self.all_sprites.add(obstacle)
+
+    def handle_collisions(self):
+        """Handle all collision detection."""
+        # Bullets vs Asteroids
+        hits = pygame.sprite.groupcollide(self.bullets, self.asteroids, True, False)
+        for bullet, hit_asteroids in hits.items():
+            for asteroid in hit_asteroids:
+                asteroid.take_damage()
+
+        # Bullets vs Obstacles
+        for bullet in self.bullets:
+            hit_obstacles = pygame.sprite.spritecollide(bullet, self.obstacles, False)
+            for obstacle in hit_obstacles:
+                bullet.kill()
+                if hasattr(obstacle, 'take_damage'):
+                    obstacle.take_damage()
+
+        # Player vs Asteroids
+        if pygame.sprite.spritecollide(self.player, self.asteroids, False,
+                                        collided=lambda p, a: p.hitbox.colliderect(a.rect)):
+            self.game_over = True
+
+        # Player vs Obstacles
+        if pygame.sprite.spritecollide(self.player, self.obstacles, False,
+                                        collided=lambda p, o: p.hitbox.colliderect(o.rect)):
+            self.game_over = True
+
+    def update(self):
+        """Update game state."""
+        if self.game_over:
+            return
+
+        keys = pygame.key.get_pressed()
+
+        # Update player
+        self.player.update(keys)
+
+        # Shooting
+        if keys[pygame.K_SPACE] and self.player.can_shoot():
+            bullet = self.player.shoot()
+            self.bullets.add(bullet)
+            self.all_sprites.add(bullet)
+
+        # Update all sprites
+        self.bullets.update()
+        self.asteroids.update()
+        self.obstacles.update()
+
+        # Spawn timers
+        self.asteroid_timer += 1
+        if self.asteroid_timer >= ASTEROID_SPAWN_RATE:
+            self.spawn_asteroid()
+            self.asteroid_timer = 0
+
+        self.obstacle_timer += 1
+        if self.obstacle_timer >= OBSTACLE_SPAWN_RATE:
+            self.spawn_obstacle()
+            self.obstacle_timer = 0
+
+        # Collisions
+        self.handle_collisions()
+
+    def draw(self):
+        """Draw everything to the screen."""
+        self.screen.fill(BLACK)
+        self.all_sprites.draw(self.screen)
+
+        # FPS display
+        if self.show_fps:
+            fps = int(self.clock.get_fps())
+            color = GREEN if fps >= 55 else YELLOW if fps >= 30 else RED
+            fps_text = self.font.render(f"FPS: {fps}", True, color)
+            self.screen.blit(fps_text, (10, 10))
+
+        # Game over screen
+        if self.game_over:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 128))
+            self.screen.blit(overlay, (0, 0))
+
+            text = self.font_large.render("GAME OVER", True, RED)
+            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2,
+                                    SCREEN_HEIGHT // 2 - 50))
+
+            restart_text = self.font.render("Press R to restart", True, WHITE)
+            self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2,
+                                            SCREEN_HEIGHT // 2 + 20))
+
+        pygame.display.flip()
+
+    def run(self):
+        """Main game loop."""
+        running = True
+        while running:
+            # Event handling
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_r and self.game_over:
+                        self.reset()
+                    elif event.key == pygame.K_f:
+                        self.show_fps = not self.show_fps
+
+            self.update()
+            self.draw()
+            self.clock.tick(FPS)
+
+        pygame.quit()
+        sys.exit()
 
 
 def main():
-    """Main game function."""
-    # Set up display
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("Space Shooter")
-    clock = pygame.time.Clock()
-
-    # Initialize game state
-    (player_x, player_y, asteroids, obstacles, bullets,
-     asteroid_spawn_timer, obstacle_spawn_timer, shoot_cooldown, game_over) = reset_game()
-
-    # Game loop
-    running = True
-    while running:
-        # Handle events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-                elif event.key == pygame.K_r and game_over:
-                    # Restart the game
-                    (player_x, player_y, asteroids, obstacles, bullets,
-                     asteroid_spawn_timer, obstacle_spawn_timer, shoot_cooldown, game_over) = reset_game()
-
-        if not game_over:
-            # Handle continuous key presses for movement and shooting
-            keys = pygame.key.get_pressed()
-            if keys[pygame.K_LEFT]:
-                player_x -= PLAYER_SPEED
-            if keys[pygame.K_RIGHT]:
-                player_x += PLAYER_SPEED
-
-            # Shooting
-            if keys[pygame.K_SPACE] and shoot_cooldown <= 0:
-                bullets.append(create_bullet(player_x, player_y))
-                shoot_cooldown = BULLET_COOLDOWN
-
-            # Decrease shoot cooldown
-            if shoot_cooldown > 0:
-                shoot_cooldown -= 1
-
-            # Keep player within screen bounds
-            if player_x < 0:
-                player_x = 0
-            if player_x > SCREEN_WIDTH - PLAYER_WIDTH:
-                player_x = SCREEN_WIDTH - PLAYER_WIDTH
-
-            # Spawn new asteroids
-            asteroid_spawn_timer += 1
-            if asteroid_spawn_timer >= ASTEROID_SPAWN_RATE:
-                asteroids.append(create_asteroid())
-                asteroid_spawn_timer = 0
-
-            # Spawn slow obstacles (barricades, giant asteroids)
-            obstacle_spawn_timer += 1
-            if obstacle_spawn_timer >= OBSTACLE_SPAWN_RATE:
-                obstacles.append(create_slow_obstacle())
-                obstacle_spawn_timer = 0
-
-            # Move asteroids down (normal speed)
-            for asteroid in asteroids:
-                asteroid["y"] += ASTEROID_SPEED
-
-            # Move slow obstacles down (half speed)
-            for obstacle in obstacles:
-                obstacle["y"] += OBSTACLE_SPEED
-
-            # Move bullets up
-            for bullet in bullets:
-                bullet["y"] -= BULLET_SPEED
-
-            # Remove objects that have moved off screen
-            asteroids = [a for a in asteroids if a["y"] < SCREEN_HEIGHT]
-            obstacles = [o for o in obstacles if o["y"] < SCREEN_HEIGHT]
-            bullets = [b for b in bullets if b["y"] > -BULLET_HEIGHT]
-
-            # Check bullet collisions
-            bullets, asteroids, obstacles = check_bullet_collisions(bullets, asteroids, obstacles)
-
-            # Check for player collisions
-            if check_player_collision(player_x, player_y, asteroids, obstacles):
-                game_over = True
-
-        # Draw everything
-        screen.fill(BLACK)
-
-        # Draw bullets
-        for bullet in bullets:
-            draw_bullet(screen, bullet)
-
-        # Draw slow obstacles (use fixed seed for consistent shape)
-        for obstacle in obstacles:
-            random.seed(id(obstacle))
-            if obstacle["type"] == "barricade":
-                draw_barricade(screen, obstacle)
-            else:
-                draw_giant_asteroid(screen, obstacle)
-
-        # Draw asteroids (use fixed seed per asteroid for consistent shape)
-        for asteroid in asteroids:
-            random.seed(id(asteroid))
-            draw_asteroid(screen, asteroid)
-        random.seed()  # Reset random seed
-
-        draw_player(screen, player_x, player_y)
-
-        if game_over:
-            draw_game_over(screen)
-
-        # Update display
-        pygame.display.flip()
-        clock.tick(FPS)
-
-    pygame.quit()
-    sys.exit()
+    """Entry point."""
+    game = Game()
+    game.run()
 
 
 if __name__ == "__main__":

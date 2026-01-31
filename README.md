@@ -13,6 +13,7 @@ A simple space shooter game built with Pygame. Designed for mobile (9:16 portrai
   - Giant asteroids (128px, 8 hits to destroy)
 - Collision detection with game over state
 - Clean game loop with consistent frame rate
+- Optimized Sprite-based architecture (ready for custom art)
 
 ## Requirements
 
@@ -50,6 +51,7 @@ python main.py
 - **Right Arrow**: Move right
 - **Space**: Shoot
 - **R**: Restart after game over
+- **F**: Toggle FPS display
 - **ESC**: Quit game
 
 ## Project Structure

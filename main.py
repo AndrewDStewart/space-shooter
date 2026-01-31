@@ -3,6 +3,7 @@ Space Shooter - A simple arcade-style space shooter game.
 
 Controls:
     Left/Right Arrow Keys: Move ship
+    Space: Shoot
     ESC: Quit game
     R: Restart after game over
 """
@@ -24,18 +25,30 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 BLUE = (50, 150, 255)
 GRAY = (150, 150, 150)
+DARK_GRAY = (100, 100, 100)
+LIGHT_GRAY = (200, 200, 200)
 RED = (255, 50, 50)
+YELLOW = (255, 255, 100)
 
 # Player settings
 PLAYER_WIDTH = 50
 PLAYER_HEIGHT = 40
 PLAYER_SPEED = 7
 
-# Obstacle settings (scaled for narrower mobile screen)
-OBSTACLE_MIN_SIZE = 25
-OBSTACLE_MAX_SIZE = 55
-OBSTACLE_SPEED = 5
-OBSTACLE_SPAWN_RATE = 50  # Lower = more frequent (frames between spawns)
+# Bullet settings
+BULLET_WIDTH = 6
+BULLET_HEIGHT = 15
+BULLET_SPEED = 10
+BULLET_COOLDOWN = 15  # Frames between shots
+
+# Asteroid settings - three distinct sizes
+ASTEROID_SIZES = {
+    "small": {"size": 32, "health": 1, "color": LIGHT_GRAY},
+    "medium": {"size": 48, "health": 2, "color": GRAY},
+    "large": {"size": 64, "health": 3, "color": DARK_GRAY},
+}
+ASTEROID_SPEED = 4
+ASTEROID_SPAWN_RATE = 60  # Frames between spawns
 
 
 def draw_player(surface, x, y):
@@ -57,31 +70,78 @@ def draw_player(surface, x, y):
     )
 
 
-def create_obstacle():
-    """Create a new obstacle at a random x position at the top of the screen."""
-    size = random.randint(OBSTACLE_MIN_SIZE, OBSTACLE_MAX_SIZE)
+def create_bullet(player_x, player_y):
+    """Create a new bullet at the player's position."""
+    return {
+        "x": player_x + PLAYER_WIDTH // 2 - BULLET_WIDTH // 2,
+        "y": player_y,
+    }
+
+
+def draw_bullet(surface, bullet):
+    """Draw a bullet as a yellow rectangle."""
+    pygame.draw.rect(
+        surface,
+        YELLOW,
+        (bullet["x"], bullet["y"], BULLET_WIDTH, BULLET_HEIGHT)
+    )
+
+
+def create_asteroid():
+    """Create a new asteroid at a random x position at the top of the screen."""
+    # Randomly choose asteroid size with weighted probability
+    size_type = random.choices(
+        ["small", "medium", "large"],
+        weights=[50, 35, 15],  # Small more common, large rare
+        k=1
+    )[0]
+
+    size_data = ASTEROID_SIZES[size_type]
+    size = size_data["size"]
     x = random.randint(0, SCREEN_WIDTH - size)
-    return {"x": x, "y": -size, "size": size}
+
+    return {
+        "x": x,
+        "y": -size,
+        "size": size,
+        "size_type": size_type,
+        "health": size_data["health"],
+        "max_health": size_data["health"],
+        "color": size_data["color"],
+    }
 
 
-def draw_obstacle(surface, obstacle):
-    """Draw an obstacle as a rough asteroid shape."""
-    x, y, size = obstacle["x"], obstacle["y"], obstacle["size"]
+def draw_asteroid(surface, asteroid):
+    """Draw an asteroid as a rough spherical shape."""
+    x, y, size = asteroid["x"], asteroid["y"], asteroid["size"]
     center_x = x + size // 2
     center_y = y + size // 2
+    radius = size // 2 - 2
 
-    # Draw asteroid as an irregular polygon
+    # Main body (slightly irregular circle using polygon)
     points = []
-    for i in range(8):
-        angle = i * (360 / 8)
-        # Vary the radius for each point to create irregular shape
-        radius = size // 2 - random.randint(0, size // 6)
-        px = center_x + radius * pygame.math.Vector2(1, 0).rotate(angle).x
-        py = center_y + radius * pygame.math.Vector2(1, 0).rotate(angle).y
+    num_points = 10
+    for i in range(num_points):
+        angle = i * (360 / num_points)
+        # Slight variation in radius for rocky look
+        point_radius = radius - random.randint(0, radius // 5)
+        px = center_x + point_radius * pygame.math.Vector2(1, 0).rotate(angle).x
+        py = center_y + point_radius * pygame.math.Vector2(1, 0).rotate(angle).y
         points.append((px, py))
 
-    pygame.draw.polygon(surface, GRAY, points)
+    pygame.draw.polygon(surface, asteroid["color"], points)
     pygame.draw.polygon(surface, WHITE, points, 2)  # Outline
+
+    # Show damage with cracks (darker lines) based on health
+    damage_taken = asteroid["max_health"] - asteroid["health"]
+    if damage_taken > 0:
+        # Draw crack lines to show damage
+        for i in range(damage_taken):
+            crack_start = (center_x + random.randint(-radius//2, radius//2),
+                          center_y + random.randint(-radius//2, radius//2))
+            crack_end = (center_x + random.randint(-radius//2, radius//2),
+                        center_y + random.randint(-radius//2, radius//2))
+            pygame.draw.line(surface, BLACK, crack_start, crack_end, 2)
 
 
 def get_player_rect(player_x, player_y):
@@ -95,17 +155,46 @@ def get_player_rect(player_x, player_y):
     )
 
 
-def check_collision(player_x, player_y, obstacles):
-    """Check if the player collides with any obstacle."""
+def get_asteroid_rect(asteroid):
+    """Get the hitbox for an asteroid."""
+    return pygame.Rect(
+        asteroid["x"], asteroid["y"],
+        asteroid["size"], asteroid["size"]
+    )
+
+
+def check_player_collision(player_x, player_y, asteroids):
+    """Check if the player collides with any asteroid."""
     player_rect = get_player_rect(player_x, player_y)
-    for obstacle in obstacles:
-        obstacle_rect = pygame.Rect(
-            obstacle["x"], obstacle["y"],
-            obstacle["size"], obstacle["size"]
-        )
-        if player_rect.colliderect(obstacle_rect):
+    for asteroid in asteroids:
+        if player_rect.colliderect(get_asteroid_rect(asteroid)):
             return True
     return False
+
+
+def check_bullet_collisions(bullets, asteroids):
+    """Check for bullet-asteroid collisions. Returns updated lists."""
+    bullets_to_remove = []
+    asteroids_to_remove = []
+
+    for bullet in bullets:
+        bullet_rect = pygame.Rect(
+            bullet["x"], bullet["y"],
+            BULLET_WIDTH, BULLET_HEIGHT
+        )
+        for asteroid in asteroids:
+            if bullet_rect.colliderect(get_asteroid_rect(asteroid)):
+                bullets_to_remove.append(bullet)
+                asteroid["health"] -= 1
+                if asteroid["health"] <= 0:
+                    asteroids_to_remove.append(asteroid)
+                break  # Bullet can only hit one asteroid
+
+    # Remove destroyed bullets and asteroids
+    new_bullets = [b for b in bullets if b not in bullets_to_remove]
+    new_asteroids = [a for a in asteroids if a not in asteroids_to_remove]
+
+    return new_bullets, new_asteroids
 
 
 def draw_game_over(surface):
@@ -130,7 +219,12 @@ def reset_game():
     """Reset all game state for a new game."""
     player_x = SCREEN_WIDTH // 2 - PLAYER_WIDTH // 2
     player_y = SCREEN_HEIGHT - PLAYER_HEIGHT - 20
-    return player_x, player_y, [], 0, False
+    asteroids = []
+    bullets = []
+    spawn_timer = 0
+    shoot_cooldown = 0
+    game_over = False
+    return player_x, player_y, asteroids, bullets, spawn_timer, shoot_cooldown, game_over
 
 
 def main():
@@ -141,7 +235,7 @@ def main():
     clock = pygame.time.Clock()
 
     # Initialize game state
-    player_x, player_y, obstacles, spawn_timer, game_over = reset_game()
+    player_x, player_y, asteroids, bullets, spawn_timer, shoot_cooldown, game_over = reset_game()
 
     # Game loop
     running = True
@@ -155,15 +249,24 @@ def main():
                     running = False
                 elif event.key == pygame.K_r and game_over:
                     # Restart the game
-                    player_x, player_y, obstacles, spawn_timer, game_over = reset_game()
+                    player_x, player_y, asteroids, bullets, spawn_timer, shoot_cooldown, game_over = reset_game()
 
         if not game_over:
-            # Handle continuous key presses for movement
+            # Handle continuous key presses for movement and shooting
             keys = pygame.key.get_pressed()
             if keys[pygame.K_LEFT]:
                 player_x -= PLAYER_SPEED
             if keys[pygame.K_RIGHT]:
                 player_x += PLAYER_SPEED
+
+            # Shooting
+            if keys[pygame.K_SPACE] and shoot_cooldown <= 0:
+                bullets.append(create_bullet(player_x, player_y))
+                shoot_cooldown = BULLET_COOLDOWN
+
+            # Decrease shoot cooldown
+            if shoot_cooldown > 0:
+                shoot_cooldown -= 1
 
             # Keep player within screen bounds
             if player_x < 0:
@@ -171,30 +274,42 @@ def main():
             if player_x > SCREEN_WIDTH - PLAYER_WIDTH:
                 player_x = SCREEN_WIDTH - PLAYER_WIDTH
 
-            # Spawn new obstacles
+            # Spawn new asteroids
             spawn_timer += 1
-            if spawn_timer >= OBSTACLE_SPAWN_RATE:
-                obstacles.append(create_obstacle())
+            if spawn_timer >= ASTEROID_SPAWN_RATE:
+                asteroids.append(create_asteroid())
                 spawn_timer = 0
 
-            # Move obstacles down
-            for obstacle in obstacles:
-                obstacle["y"] += OBSTACLE_SPEED
+            # Move asteroids down
+            for asteroid in asteroids:
+                asteroid["y"] += ASTEROID_SPEED
 
-            # Remove obstacles that have moved off screen
-            obstacles = [obs for obs in obstacles if obs["y"] < SCREEN_HEIGHT]
+            # Move bullets up
+            for bullet in bullets:
+                bullet["y"] -= BULLET_SPEED
 
-            # Check for collisions
-            if check_collision(player_x, player_y, obstacles):
+            # Remove asteroids and bullets that have moved off screen
+            asteroids = [a for a in asteroids if a["y"] < SCREEN_HEIGHT]
+            bullets = [b for b in bullets if b["y"] > -BULLET_HEIGHT]
+
+            # Check bullet-asteroid collisions
+            bullets, asteroids = check_bullet_collisions(bullets, asteroids)
+
+            # Check for player-asteroid collisions
+            if check_player_collision(player_x, player_y, asteroids):
                 game_over = True
 
         # Draw everything
         screen.fill(BLACK)
 
-        # Draw obstacles (use fixed seed per obstacle for consistent shape)
-        for i, obstacle in enumerate(obstacles):
-            random.seed(id(obstacle))
-            draw_obstacle(screen, obstacle)
+        # Draw bullets
+        for bullet in bullets:
+            draw_bullet(screen, bullet)
+
+        # Draw asteroids (use fixed seed per asteroid for consistent shape)
+        for asteroid in asteroids:
+            random.seed(id(asteroid))
+            draw_asteroid(screen, asteroid)
         random.seed()  # Reset random seed
 
         draw_player(screen, player_x, player_y)

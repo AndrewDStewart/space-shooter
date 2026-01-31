@@ -5,7 +5,9 @@ A simple space shooter game built with Pygame. Designed for mobile (9:16 portrai
 ## Features
 
 - Player ship with left/right movement
-- Asteroids that spawn and fly toward the player
+- Shooting mechanics (spacebar to fire)
+- Three asteroid sizes (small, medium, large) with different health
+- Asteroids take 1-3 hits to destroy based on size
 - Collision detection with game over state
 - Clean game loop with consistent frame rate
 
@@ -43,6 +45,7 @@ python main.py
 
 - **Left Arrow**: Move left
 - **Right Arrow**: Move right
+- **Space**: Shoot
 - **R**: Restart after game over
 - **ESC**: Quit game
 

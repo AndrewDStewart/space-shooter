@@ -1,6 +1,6 @@
 # Space Shooter
 
-A simple space shooter game built with Pygame. This is a learning project demonstrating game development fundamentals.
+A simple space shooter game built with Pygame. Designed for mobile (9:16 portrait) with plans for web/mobile deployment. This is a learning project demonstrating game development fundamentals.
 
 ## Features
 

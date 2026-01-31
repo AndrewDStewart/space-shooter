@@ -14,9 +14,9 @@ import random
 # Initialize Pygame
 pygame.init()
 
-# Game constants
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+# Game constants (9:16 portrait aspect ratio for mobile)
+SCREEN_WIDTH = 450
+SCREEN_HEIGHT = 800
 FPS = 60
 
 # Colors (RGB)
@@ -31,11 +31,11 @@ PLAYER_WIDTH = 50
 PLAYER_HEIGHT = 40
 PLAYER_SPEED = 7
 
-# Obstacle settings
-OBSTACLE_MIN_SIZE = 30
-OBSTACLE_MAX_SIZE = 70
+# Obstacle settings (scaled for narrower mobile screen)
+OBSTACLE_MIN_SIZE = 25
+OBSTACLE_MAX_SIZE = 55
 OBSTACLE_SPEED = 5
-OBSTACLE_SPAWN_RATE = 45  # Lower = more frequent (frames between spawns)
+OBSTACLE_SPAWN_RATE = 50  # Lower = more frequent (frames between spawns)
 
 
 def draw_player(surface, x, y):
@@ -110,11 +110,11 @@ def check_collision(player_x, player_y, obstacles):
 
 def draw_game_over(surface):
     """Draw the game over screen."""
-    font_large = pygame.font.Font(None, 74)
-    font_small = pygame.font.Font(None, 36)
+    font_large = pygame.font.Font(None, 64)
+    font_small = pygame.font.Font(None, 28)
 
     game_over_text = font_large.render("GAME OVER", True, RED)
-    restart_text = font_small.render("Press R to restart or ESC to quit", True, WHITE)
+    restart_text = font_small.render("Press R to restart", True, WHITE)
 
     surface.blit(
         game_over_text,

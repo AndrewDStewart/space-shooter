@@ -2,11 +2,16 @@
 Space Shooter - A simple arcade-style space shooter game.
 
 Controls:
-    Left/Right Arrow Keys: Move ship
-    Space: Shoot
-    ESC: Quit game
-    R: Restart after game over
-    F: Toggle FPS display
+    Keyboard:
+        Left/Right Arrow Keys: Move ship
+        Space: Shoot
+        P or ESC: Pause game
+        R: Restart after game over
+        F: Toggle FPS display
+
+    Touch/Mouse:
+        On-screen buttons for movement and shooting
+        Pause button in top-right corner
 """
 
 import pygame
@@ -67,6 +72,172 @@ BARRICADE_HEIGHT = 16
 GIANT_ASTEROID_SIZE = 128
 GIANT_ASTEROID_HEALTH = 8
 
+# Touch control settings
+TOUCH_BUTTON_SIZE = 70
+TOUCH_BUTTON_MARGIN = 20
+TOUCH_BUTTON_ALPHA = 150  # Semi-transparent
+
+
+# --- UI Classes ---
+
+class TouchButton:
+    """A touchable on-screen button."""
+
+    def __init__(self, x, y, width, height, label, color=WHITE):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.label = label
+        self.color = color
+        self.pressed = False
+        self.font = pygame.font.Font(None, 32)
+
+    def draw(self, surface):
+        """Draw the button with transparency."""
+        # Create semi-transparent surface
+        button_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+
+        # Background
+        alpha = TOUCH_BUTTON_ALPHA + 50 if self.pressed else TOUCH_BUTTON_ALPHA
+        bg_color = (*self.color[:3], alpha)
+        pygame.draw.rect(button_surface, bg_color, (0, 0, self.rect.width, self.rect.height),
+                        border_radius=10)
+
+        # Border
+        border_color = (*WHITE[:3], 200)
+        pygame.draw.rect(button_surface, border_color, (0, 0, self.rect.width, self.rect.height),
+                        width=3, border_radius=10)
+
+        surface.blit(button_surface, self.rect.topleft)
+
+        # Label
+        text = self.font.render(self.label, True, WHITE)
+        text_rect = text.get_rect(center=self.rect.center)
+        surface.blit(text, text_rect)
+
+    def check_press(self, pos):
+        """Check if position is within button."""
+        return self.rect.collidepoint(pos)
+
+
+class TouchControls:
+    """Manages all on-screen touch controls."""
+
+    def __init__(self):
+        # Movement buttons (bottom corners)
+        btn_y = SCREEN_HEIGHT - TOUCH_BUTTON_SIZE - TOUCH_BUTTON_MARGIN
+
+        self.left_btn = TouchButton(
+            TOUCH_BUTTON_MARGIN, btn_y,
+            TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE,
+            "<", BLUE
+        )
+
+        self.right_btn = TouchButton(
+            TOUCH_BUTTON_MARGIN + TOUCH_BUTTON_SIZE + 10, btn_y,
+            TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE,
+            ">", BLUE
+        )
+
+        # Fire button (bottom right)
+        self.fire_btn = TouchButton(
+            SCREEN_WIDTH - TOUCH_BUTTON_SIZE - TOUCH_BUTTON_MARGIN, btn_y,
+            TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE,
+            "FIRE", RED
+        )
+
+        # Pause button (top right)
+        pause_size = 50
+        self.pause_btn = TouchButton(
+            SCREEN_WIDTH - pause_size - 10, 10,
+            pause_size, pause_size,
+            "||", GRAY
+        )
+
+        self.all_buttons = [self.left_btn, self.right_btn, self.fire_btn, self.pause_btn]
+
+    def update(self, mouse_pressed, mouse_pos):
+        """Update button states based on mouse/touch input."""
+        if mouse_pressed:
+            self.left_btn.pressed = self.left_btn.check_press(mouse_pos)
+            self.right_btn.pressed = self.right_btn.check_press(mouse_pos)
+            self.fire_btn.pressed = self.fire_btn.check_press(mouse_pos)
+        else:
+            self.left_btn.pressed = False
+            self.right_btn.pressed = False
+            self.fire_btn.pressed = False
+
+    def check_pause_tap(self, pos):
+        """Check if pause button was tapped."""
+        return self.pause_btn.check_press(pos)
+
+    def draw(self, surface):
+        """Draw all touch controls."""
+        for btn in self.all_buttons:
+            btn.draw(surface)
+
+    @property
+    def moving_left(self):
+        return self.left_btn.pressed
+
+    @property
+    def moving_right(self):
+        return self.right_btn.pressed
+
+    @property
+    def firing(self):
+        return self.fire_btn.pressed
+
+
+class PauseMenu:
+    """Pause menu overlay."""
+
+    def __init__(self):
+        self.font_large = pygame.font.Font(None, 64)
+        self.font_medium = pygame.font.Font(None, 40)
+
+        # Menu buttons
+        btn_width = 200
+        btn_height = 50
+        btn_x = SCREEN_WIDTH // 2 - btn_width // 2
+        center_y = SCREEN_HEIGHT // 2
+
+        self.resume_btn = TouchButton(
+            btn_x, center_y - 10,
+            btn_width, btn_height,
+            "RESUME", GREEN
+        )
+        self.resume_btn.font = self.font_medium
+
+        self.quit_btn = TouchButton(
+            btn_x, center_y + 60,
+            btn_width, btn_height,
+            "QUIT", RED
+        )
+        self.quit_btn.font = self.font_medium
+
+    def draw(self, surface):
+        """Draw the pause menu."""
+        # Dark overlay
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        surface.blit(overlay, (0, 0))
+
+        # Title
+        title = self.font_large.render("PAUSED", True, WHITE)
+        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2,
+                            SCREEN_HEIGHT // 2 - 100))
+
+        # Buttons
+        self.resume_btn.draw(surface)
+        self.quit_btn.draw(surface)
+
+    def handle_click(self, pos):
+        """Handle click on menu. Returns 'resume', 'quit', or None."""
+        if self.resume_btn.check_press(pos):
+            return 'resume'
+        elif self.quit_btn.check_press(pos):
+            return 'quit'
+        return None
+
 
 # --- Sprite Classes ---
 
@@ -95,11 +266,11 @@ class Player(pygame.sprite.Sprite):
         pygame.draw.polygon(self.image, BLUE, points)
         pygame.draw.circle(self.image, WHITE, (PLAYER_WIDTH // 2, PLAYER_HEIGHT // 2 + 5), 8)
 
-    def update(self, keys):
-        """Update player position based on input."""
-        if keys[pygame.K_LEFT]:
+    def update(self, keys, touch_left=False, touch_right=False):
+        """Update player position based on keyboard and touch input."""
+        if keys[pygame.K_LEFT] or touch_left:
             self.rect.x -= PLAYER_SPEED
-        if keys[pygame.K_RIGHT]:
+        if keys[pygame.K_RIGHT] or touch_right:
             self.rect.x += PLAYER_SPEED
 
         # Keep within bounds
@@ -321,6 +492,11 @@ class Game:
         self.font = pygame.font.Font(None, 28)
         self.font_large = pygame.font.Font(None, 64)
         self.show_fps = True
+
+        # Touch controls and pause menu
+        self.touch_controls = TouchControls()
+        self.pause_menu = PauseMenu()
+
         self.reset()
 
     def reset(self):
@@ -341,6 +517,7 @@ class Game:
 
         # State
         self.game_over = False
+        self.paused = False
 
     def spawn_asteroid(self):
         """Spawn a new asteroid."""
@@ -383,18 +560,33 @@ class Game:
                                         collided=lambda p, o: p.hitbox.colliderect(o.rect)):
             self.game_over = True
 
+    def toggle_pause(self):
+        """Toggle pause state."""
+        if not self.game_over:
+            self.paused = not self.paused
+
     def update(self):
         """Update game state."""
-        if self.game_over:
+        if self.game_over or self.paused:
             return
 
         keys = pygame.key.get_pressed()
 
-        # Update player
-        self.player.update(keys)
+        # Update touch controls
+        mouse_pressed = pygame.mouse.get_pressed()[0]
+        mouse_pos = pygame.mouse.get_pos()
+        self.touch_controls.update(mouse_pressed, mouse_pos)
 
-        # Shooting
-        if keys[pygame.K_SPACE] and self.player.can_shoot():
+        # Update player with both keyboard and touch input
+        self.player.update(
+            keys,
+            touch_left=self.touch_controls.moving_left,
+            touch_right=self.touch_controls.moving_right
+        )
+
+        # Shooting (keyboard or touch)
+        shooting = keys[pygame.K_SPACE] or self.touch_controls.firing
+        if shooting and self.player.can_shoot():
             bullet = self.player.shoot()
             self.bullets.add(bullet)
             self.all_sprites.add(bullet)
@@ -423,12 +615,20 @@ class Game:
         self.screen.fill(BLACK)
         self.all_sprites.draw(self.screen)
 
+        # Touch controls (always visible during gameplay)
+        if not self.game_over:
+            self.touch_controls.draw(self.screen)
+
         # FPS display
         if self.show_fps:
             fps = int(self.clock.get_fps())
             color = GREEN if fps >= 55 else YELLOW if fps >= 30 else RED
             fps_text = self.font.render(f"FPS: {fps}", True, color)
             self.screen.blit(fps_text, (10, 10))
+
+        # Pause menu
+        if self.paused:
+            self.pause_menu.draw(self.screen)
 
         # Game over screen
         if self.game_over:
@@ -444,6 +644,11 @@ class Game:
             self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2,
                                             SCREEN_HEIGHT // 2 + 20))
 
+            # Touch-friendly restart button
+            tap_text = self.font.render("or tap here", True, WHITE)
+            self.screen.blit(tap_text, (SCREEN_WIDTH // 2 - tap_text.get_width() // 2,
+                                        SCREEN_HEIGHT // 2 + 50))
+
         pygame.display.flip()
 
     def run(self):
@@ -454,13 +659,36 @@ class Game:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        running = False
+                    if event.key == pygame.K_ESCAPE or event.key == pygame.K_p:
+                        if self.paused:
+                            self.paused = False
+                        elif not self.game_over:
+                            self.toggle_pause()
                     elif event.key == pygame.K_r and self.game_over:
                         self.reset()
                     elif event.key == pygame.K_f:
                         self.show_fps = not self.show_fps
+
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    pos = event.pos
+
+                    # Handle pause menu clicks
+                    if self.paused:
+                        action = self.pause_menu.handle_click(pos)
+                        if action == 'resume':
+                            self.paused = False
+                        elif action == 'quit':
+                            running = False
+
+                    # Handle game over tap to restart
+                    elif self.game_over:
+                        self.reset()
+
+                    # Handle pause button during gameplay
+                    elif self.touch_controls.check_pause_tap(pos):
+                        self.toggle_pause()
 
             self.update()
             self.draw()

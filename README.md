@@ -47,12 +47,18 @@ python main.py
 
 ## Controls
 
-- **Left Arrow**: Move left
-- **Right Arrow**: Move right
+### Keyboard
+- **Left/Right Arrow**: Move ship
 - **Space**: Shoot
+- **P** or **ESC**: Pause game
 - **R**: Restart after game over
 - **F**: Toggle FPS display
-- **ESC**: Quit game
+
+### Touch/Mouse
+- **< / >** buttons: Move ship (bottom-left)
+- **FIRE** button: Shoot (bottom-right)
+- **||** button: Pause (top-right)
+- Tap anywhere to restart after game over
 
 ## Project Structure
 

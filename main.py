@@ -66,9 +66,9 @@ ASTEROID_SPAWN_RATE = 60
 OBSTACLE_SPEED = 2
 OBSTACLE_SPAWN_RATE = 180
 
-# Barricade settings (rotated for landscape - now tall and thin)
-BARRICADE_WIDTH = 16
-BARRICADE_HEIGHT = 64
+# Barricade settings (wide horizontal walls)
+BARRICADE_WIDTH = 64
+BARRICADE_HEIGHT = 16
 
 # Giant asteroid settings
 GIANT_ASTEROID_SIZE = 100  # Slightly smaller for landscape view
@@ -368,9 +368,8 @@ class Player(pygame.sprite.Sprite):
         if keys[pygame.K_RIGHT] or touch_right:
             self.rect.x += PLAYER_SPEED
 
-        # Keep within bounds (leave room for UI on sides)
-        play_area = pygame.Rect(150, 0, SCREEN_WIDTH - 300, SCREEN_HEIGHT)
-        self.rect.clamp_ip(play_area)
+        # Keep within full screen bounds
+        self.rect.clamp_ip(pygame.Rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT))
         self.hitbox.center = self.rect.center
 
         if self.shoot_cooldown > 0:
@@ -422,8 +421,7 @@ class Asteroid(pygame.sprite.Sprite):
         self.base_image = self._create_asteroid_surface()
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect()
-        # Spawn in the play area (avoiding UI zones)
-        self.rect.x = random.randint(150, SCREEN_WIDTH - 150 - self.size)
+        self.rect.x = random.randint(0, SCREEN_WIDTH - self.size)
         self.rect.bottom = 0
 
     def _create_asteroid_surface(self):
@@ -482,15 +480,16 @@ class Barricade(pygame.sprite.Sprite):
         self.image = pygame.Surface((BARRICADE_WIDTH, BARRICADE_HEIGHT))
         self._draw_barricade()
         self.rect = self.image.get_rect()
-        self.rect.x = random.randint(150, SCREEN_WIDTH - 150 - BARRICADE_WIDTH)
+        self.rect.x = random.randint(0, SCREEN_WIDTH - BARRICADE_WIDTH)
         self.rect.bottom = 0
         self.indestructible = True
 
     def _draw_barricade(self):
         """Pre-render barricade."""
         self.image.fill(BROWN)
-        for ry in range(6, BARRICADE_HEIGHT - 6, 12):
-            pygame.draw.circle(self.image, DARK_BROWN, (BARRICADE_WIDTH // 2, ry), 3)
+        # Horizontal rivets
+        for rx in range(6, BARRICADE_WIDTH - 6, 12):
+            pygame.draw.circle(self.image, DARK_BROWN, (rx, BARRICADE_HEIGHT // 2), 3)
         pygame.draw.rect(self.image, WHITE, (0, 0, BARRICADE_WIDTH, BARRICADE_HEIGHT), 2)
 
     def update(self):
@@ -512,7 +511,7 @@ class GiantAsteroid(pygame.sprite.Sprite):
         self.base_image = self._create_surface()
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect()
-        self.rect.x = random.randint(150, SCREEN_WIDTH - 150 - self.size)
+        self.rect.x = random.randint(0, SCREEN_WIDTH - self.size)
         self.rect.bottom = 0
 
     def _create_surface(self):
@@ -688,12 +687,6 @@ class Game:
     def draw(self):
         """Draw everything to the screen."""
         self.screen.fill(BLACK)
-
-        # Draw play area boundary (subtle)
-        pygame.draw.line(self.screen, DARK_GRAY, (150, 0), (150, SCREEN_HEIGHT), 1)
-        pygame.draw.line(self.screen, DARK_GRAY, (SCREEN_WIDTH - 150, 0),
-                        (SCREEN_WIDTH - 150, SCREEN_HEIGHT), 1)
-
         self.all_sprites.draw(self.screen)
 
         if not self.game_over:

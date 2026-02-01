@@ -1,17 +1,17 @@
-# Space Shooter
+# Space Delivery
 
-A simple space shooter game built with Pygame. Designed for mobile (16:9 landscape) with virtual joystick controls. This is a learning project demonstrating game development fundamentals.
+A delivery game where you navigate through obstacles to complete deliveries safely. Built with Pygame, designed for mobile (16:9 landscape) with virtual joystick controls. This is a learning project demonstrating game development fundamentals.
 
 ## Features
 
+- **Delivery scoring system** - Start with $5000, lose money when hit
+- **Health system** - Vertical health bar, game over when depleted
+- **10-80-10 layout** - Left panel (health + joystick), center play area, right panel (fire button)
 - Player ship with left/right movement
-- Shooting mechanics (spacebar to fire)
-- Three asteroid sizes (small, medium, large) with different health
-- Asteroids take 1-3 hits to destroy based on size
-- Slow obstacles that require navigation:
-  - Barricades (indestructible walls)
-  - Giant asteroids (128px, 8 hits to destroy)
-- Collision detection with game over state
+- Shooting mechanics (spacebar or fire button)
+- Three asteroid sizes with different damage values
+- Slow obstacles (barricades, giant asteroids)
+- Invincibility frames after taking damage
 - Clean game loop with consistent frame rate
 - Optimized Sprite-based architecture (ready for custom art)
 

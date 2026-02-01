@@ -1,6 +1,6 @@
 # Space Shooter
 
-A simple space shooter game built with Pygame. Designed for mobile (9:16 portrait) with plans for web/mobile deployment. This is a learning project demonstrating game development fundamentals.
+A simple space shooter game built with Pygame. Designed for mobile (16:9 landscape) with virtual joystick controls. This is a learning project demonstrating game development fundamentals.
 
 ## Features
 
@@ -55,9 +55,9 @@ python main.py
 - **F**: Toggle FPS display
 
 ### Touch/Mouse
-- **< / >** buttons: Move ship (bottom-left)
-- **FIRE** button: Shoot (bottom-right)
-- **||** button: Pause (top-right)
+- **Virtual Joystick** (left side): Drag to move ship left/right
+- **FIRE** button (right side): Shoot
+- **||** button (top-right): Pause
 - Tap anywhere to restart after game over
 
 ## Project Structure

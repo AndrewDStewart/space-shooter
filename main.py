@@ -10,20 +10,22 @@ Controls:
         F: Toggle FPS display
 
     Touch/Mouse:
-        On-screen buttons for movement and shooting
-        Pause button in top-right corner
+        Virtual joystick (left side): Move ship
+        Fire button (right side): Shoot
+        Pause button (top-right): Pause game
 """
 
 import pygame
 import sys
 import random
+import math
 
 # Initialize Pygame
 pygame.init()
 
-# Game constants (9:16 portrait aspect ratio for mobile)
-SCREEN_WIDTH = 450
-SCREEN_HEIGHT = 800
+# Game constants (16:9 landscape aspect ratio for mobile)
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 450
 FPS = 60
 
 # Colors (RGB)
@@ -64,49 +66,152 @@ ASTEROID_SPAWN_RATE = 60
 OBSTACLE_SPEED = 2
 OBSTACLE_SPAWN_RATE = 180
 
-# Barricade settings
-BARRICADE_WIDTH = 64
-BARRICADE_HEIGHT = 16
+# Barricade settings (rotated for landscape - now tall and thin)
+BARRICADE_WIDTH = 16
+BARRICADE_HEIGHT = 64
 
 # Giant asteroid settings
-GIANT_ASTEROID_SIZE = 128
+GIANT_ASTEROID_SIZE = 100  # Slightly smaller for landscape view
 GIANT_ASTEROID_HEALTH = 8
 
 # Touch control settings
-TOUCH_BUTTON_SIZE = 70
-TOUCH_BUTTON_MARGIN = 20
-TOUCH_BUTTON_ALPHA = 150  # Semi-transparent
+JOYSTICK_RADIUS = 60
+JOYSTICK_KNOB_RADIUS = 25
+JOYSTICK_DEAD_ZONE = 10
+TOUCH_BUTTON_ALPHA = 150
 
 
 # --- UI Classes ---
 
+class VirtualJoystick:
+    """A virtual joystick for touch/mouse control."""
+
+    def __init__(self, center_x, center_y):
+        self.center = pygame.math.Vector2(center_x, center_y)
+        self.knob_pos = pygame.math.Vector2(center_x, center_y)
+        self.active = False
+        self.value_x = 0  # -1 to 1
+
+    def update(self, mouse_pressed, mouse_pos):
+        """Update joystick based on input."""
+        mouse_vec = pygame.math.Vector2(mouse_pos)
+
+        # Check if touch is within joystick area
+        distance_to_center = self.center.distance_to(mouse_vec)
+
+        if mouse_pressed:
+            # Check if starting touch is near joystick
+            if distance_to_center <= JOYSTICK_RADIUS * 1.5 or self.active:
+                self.active = True
+
+                # Calculate offset from center
+                offset = mouse_vec - self.center
+
+                # Clamp to joystick radius
+                if offset.length() > JOYSTICK_RADIUS:
+                    offset.scale_to_length(JOYSTICK_RADIUS)
+
+                self.knob_pos = self.center + offset
+
+                # Calculate normalized value (-1 to 1) with dead zone
+                if abs(offset.x) > JOYSTICK_DEAD_ZONE:
+                    self.value_x = offset.x / JOYSTICK_RADIUS
+                else:
+                    self.value_x = 0
+        else:
+            self.active = False
+            self.knob_pos = self.center.copy()
+            self.value_x = 0
+
+    def draw(self, surface):
+        """Draw the joystick."""
+        # Outer ring (base)
+        base_surface = pygame.Surface((JOYSTICK_RADIUS * 2 + 20, JOYSTICK_RADIUS * 2 + 20), pygame.SRCALPHA)
+        pygame.draw.circle(
+            base_surface,
+            (*GRAY[:3], TOUCH_BUTTON_ALPHA),
+            (JOYSTICK_RADIUS + 10, JOYSTICK_RADIUS + 10),
+            JOYSTICK_RADIUS
+        )
+        pygame.draw.circle(
+            base_surface,
+            (*WHITE[:3], 200),
+            (JOYSTICK_RADIUS + 10, JOYSTICK_RADIUS + 10),
+            JOYSTICK_RADIUS,
+            3
+        )
+        surface.blit(base_surface, (self.center.x - JOYSTICK_RADIUS - 10,
+                                     self.center.y - JOYSTICK_RADIUS - 10))
+
+        # Inner knob
+        knob_alpha = TOUCH_BUTTON_ALPHA + 50 if self.active else TOUCH_BUTTON_ALPHA
+        knob_surface = pygame.Surface((JOYSTICK_KNOB_RADIUS * 2 + 10, JOYSTICK_KNOB_RADIUS * 2 + 10), pygame.SRCALPHA)
+        pygame.draw.circle(
+            knob_surface,
+            (*BLUE[:3], knob_alpha),
+            (JOYSTICK_KNOB_RADIUS + 5, JOYSTICK_KNOB_RADIUS + 5),
+            JOYSTICK_KNOB_RADIUS
+        )
+        pygame.draw.circle(
+            knob_surface,
+            (*WHITE[:3], 220),
+            (JOYSTICK_KNOB_RADIUS + 5, JOYSTICK_KNOB_RADIUS + 5),
+            JOYSTICK_KNOB_RADIUS,
+            2
+        )
+        surface.blit(knob_surface, (self.knob_pos.x - JOYSTICK_KNOB_RADIUS - 5,
+                                     self.knob_pos.y - JOYSTICK_KNOB_RADIUS - 5))
+
+    @property
+    def moving_left(self):
+        return self.value_x < -0.3
+
+    @property
+    def moving_right(self):
+        return self.value_x > 0.3
+
+
 class TouchButton:
     """A touchable on-screen button."""
 
-    def __init__(self, x, y, width, height, label, color=WHITE):
+    def __init__(self, x, y, width, height, label, color=WHITE, radius=None):
         self.rect = pygame.Rect(x, y, width, height)
         self.label = label
         self.color = color
         self.pressed = False
         self.font = pygame.font.Font(None, 32)
+        self.radius = radius  # For circular buttons
 
     def draw(self, surface):
         """Draw the button with transparency."""
-        # Create semi-transparent surface
-        button_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
-
-        # Background
-        alpha = TOUCH_BUTTON_ALPHA + 50 if self.pressed else TOUCH_BUTTON_ALPHA
-        bg_color = (*self.color[:3], alpha)
-        pygame.draw.rect(button_surface, bg_color, (0, 0, self.rect.width, self.rect.height),
-                        border_radius=10)
-
-        # Border
-        border_color = (*WHITE[:3], 200)
-        pygame.draw.rect(button_surface, border_color, (0, 0, self.rect.width, self.rect.height),
-                        width=3, border_radius=10)
-
-        surface.blit(button_surface, self.rect.topleft)
+        if self.radius:
+            # Circular button
+            btn_surface = pygame.Surface((self.radius * 2 + 10, self.radius * 2 + 10), pygame.SRCALPHA)
+            alpha = TOUCH_BUTTON_ALPHA + 50 if self.pressed else TOUCH_BUTTON_ALPHA
+            pygame.draw.circle(
+                btn_surface,
+                (*self.color[:3], alpha),
+                (self.radius + 5, self.radius + 5),
+                self.radius
+            )
+            pygame.draw.circle(
+                btn_surface,
+                (*WHITE[:3], 200),
+                (self.radius + 5, self.radius + 5),
+                self.radius,
+                3
+            )
+            surface.blit(btn_surface, (self.rect.centerx - self.radius - 5,
+                                        self.rect.centery - self.radius - 5))
+        else:
+            # Rectangular button
+            button_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+            alpha = TOUCH_BUTTON_ALPHA + 50 if self.pressed else TOUCH_BUTTON_ALPHA
+            pygame.draw.rect(button_surface, (*self.color[:3], alpha),
+                           (0, 0, self.rect.width, self.rect.height), border_radius=10)
+            pygame.draw.rect(button_surface, (*WHITE[:3], 200),
+                           (0, 0, self.rect.width, self.rect.height), width=3, border_radius=10)
+            surface.blit(button_surface, self.rect.topleft)
 
         # Label
         text = self.font.render(self.label, True, WHITE)
@@ -115,6 +220,10 @@ class TouchButton:
 
     def check_press(self, pos):
         """Check if position is within button."""
+        if self.radius:
+            # Circular hit detection
+            center = pygame.math.Vector2(self.rect.center)
+            return center.distance_to(pygame.math.Vector2(pos)) <= self.radius
         return self.rect.collidepoint(pos)
 
 
@@ -122,47 +231,37 @@ class TouchControls:
     """Manages all on-screen touch controls."""
 
     def __init__(self):
-        # Movement buttons (bottom corners)
-        btn_y = SCREEN_HEIGHT - TOUCH_BUTTON_SIZE - TOUCH_BUTTON_MARGIN
-
-        self.left_btn = TouchButton(
-            TOUCH_BUTTON_MARGIN, btn_y,
-            TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE,
-            "<", BLUE
+        # Virtual joystick (bottom-left)
+        joystick_margin = 100
+        self.joystick = VirtualJoystick(
+            joystick_margin,
+            SCREEN_HEIGHT - joystick_margin
         )
 
-        self.right_btn = TouchButton(
-            TOUCH_BUTTON_MARGIN + TOUCH_BUTTON_SIZE + 10, btn_y,
-            TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE,
-            ">", BLUE
-        )
-
-        # Fire button (bottom right)
+        # Fire button (bottom-right) - large circular button
+        fire_radius = 50
         self.fire_btn = TouchButton(
-            SCREEN_WIDTH - TOUCH_BUTTON_SIZE - TOUCH_BUTTON_MARGIN, btn_y,
-            TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE,
-            "FIRE", RED
+            SCREEN_WIDTH - fire_radius - 40,
+            SCREEN_HEIGHT - fire_radius - 40,
+            fire_radius * 2, fire_radius * 2,
+            "FIRE", RED, radius=fire_radius
         )
 
-        # Pause button (top right)
-        pause_size = 50
+        # Pause button (top-right)
+        pause_size = 40
         self.pause_btn = TouchButton(
-            SCREEN_WIDTH - pause_size - 10, 10,
+            SCREEN_WIDTH - pause_size - 15, 15,
             pause_size, pause_size,
             "||", GRAY
         )
 
-        self.all_buttons = [self.left_btn, self.right_btn, self.fire_btn, self.pause_btn]
-
     def update(self, mouse_pressed, mouse_pos):
-        """Update button states based on mouse/touch input."""
+        """Update controls based on mouse/touch input."""
+        self.joystick.update(mouse_pressed, mouse_pos)
+
         if mouse_pressed:
-            self.left_btn.pressed = self.left_btn.check_press(mouse_pos)
-            self.right_btn.pressed = self.right_btn.check_press(mouse_pos)
             self.fire_btn.pressed = self.fire_btn.check_press(mouse_pos)
         else:
-            self.left_btn.pressed = False
-            self.right_btn.pressed = False
             self.fire_btn.pressed = False
 
     def check_pause_tap(self, pos):
@@ -171,16 +270,17 @@ class TouchControls:
 
     def draw(self, surface):
         """Draw all touch controls."""
-        for btn in self.all_buttons:
-            btn.draw(surface)
+        self.joystick.draw(surface)
+        self.fire_btn.draw(surface)
+        self.pause_btn.draw(surface)
 
     @property
     def moving_left(self):
-        return self.left_btn.pressed
+        return self.joystick.moving_left
 
     @property
     def moving_right(self):
-        return self.right_btn.pressed
+        return self.joystick.moving_right
 
     @property
     def firing(self):
@@ -201,14 +301,14 @@ class PauseMenu:
         center_y = SCREEN_HEIGHT // 2
 
         self.resume_btn = TouchButton(
-            btn_x, center_y - 10,
+            btn_x, center_y - 30,
             btn_width, btn_height,
             "RESUME", GREEN
         )
         self.resume_btn.font = self.font_medium
 
         self.quit_btn = TouchButton(
-            btn_x, center_y + 60,
+            btn_x, center_y + 40,
             btn_width, btn_height,
             "QUIT", RED
         )
@@ -216,17 +316,14 @@ class PauseMenu:
 
     def draw(self, surface):
         """Draw the pause menu."""
-        # Dark overlay
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
         surface.blit(overlay, (0, 0))
 
-        # Title
         title = self.font_large.render("PAUSED", True, WHITE)
         surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2,
                             SCREEN_HEIGHT // 2 - 100))
 
-        # Buttons
         self.resume_btn.draw(surface)
         self.quit_btn.draw(surface)
 
@@ -246,13 +343,11 @@ class Player(pygame.sprite.Sprite):
 
     def __init__(self):
         super().__init__()
-        # Pre-render the player image
         self.image = pygame.Surface((PLAYER_WIDTH, PLAYER_HEIGHT), pygame.SRCALPHA)
         self._draw_ship()
         self.rect = self.image.get_rect()
         self.rect.centerx = SCREEN_WIDTH // 2
-        self.rect.bottom = SCREEN_HEIGHT - 20
-        # Smaller hitbox for forgiving collisions
+        self.rect.bottom = SCREEN_HEIGHT - 80  # Above the controls
         self.hitbox = self.rect.inflate(-PLAYER_HITBOX_MARGIN * 2, -PLAYER_HITBOX_MARGIN * 2)
         self.shoot_cooldown = 0
 
@@ -273,11 +368,11 @@ class Player(pygame.sprite.Sprite):
         if keys[pygame.K_RIGHT] or touch_right:
             self.rect.x += PLAYER_SPEED
 
-        # Keep within bounds
-        self.rect.clamp_ip(pygame.Rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT))
+        # Keep within bounds (leave room for UI on sides)
+        play_area = pygame.Rect(150, 0, SCREEN_WIDTH - 300, SCREEN_HEIGHT)
+        self.rect.clamp_ip(play_area)
         self.hitbox.center = self.rect.center
 
-        # Cooldown timer
         if self.shoot_cooldown > 0:
             self.shoot_cooldown -= 1
 
@@ -310,7 +405,6 @@ class Asteroid(pygame.sprite.Sprite):
     def __init__(self, size_type=None):
         super().__init__()
 
-        # Choose size randomly if not specified
         if size_type is None:
             size_type = random.choices(
                 ["small", "medium", "large"],
@@ -325,11 +419,11 @@ class Asteroid(pygame.sprite.Sprite):
         self.color = size_data["color"]
         self.speed = ASTEROID_SPEED
 
-        # Pre-render the asteroid shape
         self.base_image = self._create_asteroid_surface()
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect()
-        self.rect.x = random.randint(0, SCREEN_WIDTH - self.size)
+        # Spawn in the play area (avoiding UI zones)
+        self.rect.x = random.randint(150, SCREEN_WIDTH - 150 - self.size)
         self.rect.bottom = 0
 
     def _create_asteroid_surface(self):
@@ -338,7 +432,6 @@ class Asteroid(pygame.sprite.Sprite):
         center = self.size // 2
         radius = self.size // 2 - 2
 
-        # Generate irregular polygon points once
         points = []
         num_points = 10
         for i in range(num_points):
@@ -389,16 +482,15 @@ class Barricade(pygame.sprite.Sprite):
         self.image = pygame.Surface((BARRICADE_WIDTH, BARRICADE_HEIGHT))
         self._draw_barricade()
         self.rect = self.image.get_rect()
-        self.rect.x = random.randint(0, SCREEN_WIDTH - BARRICADE_WIDTH)
+        self.rect.x = random.randint(150, SCREEN_WIDTH - 150 - BARRICADE_WIDTH)
         self.rect.bottom = 0
         self.indestructible = True
 
     def _draw_barricade(self):
         """Pre-render barricade."""
         self.image.fill(BROWN)
-        # Metal rivets
-        for rx in range(6, BARRICADE_WIDTH - 6, 12):
-            pygame.draw.circle(self.image, DARK_BROWN, (rx, BARRICADE_HEIGHT // 2), 3)
+        for ry in range(6, BARRICADE_HEIGHT - 6, 12):
+            pygame.draw.circle(self.image, DARK_BROWN, (BARRICADE_WIDTH // 2, ry), 3)
         pygame.draw.rect(self.image, WHITE, (0, 0, BARRICADE_WIDTH, BARRICADE_HEIGHT), 2)
 
     def update(self):
@@ -420,7 +512,7 @@ class GiantAsteroid(pygame.sprite.Sprite):
         self.base_image = self._create_surface()
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect()
-        self.rect.x = random.randint(0, SCREEN_WIDTH - self.size)
+        self.rect.x = random.randint(150, SCREEN_WIDTH - 150 - self.size)
         self.rect.bottom = 0
 
     def _create_surface(self):
@@ -429,7 +521,6 @@ class GiantAsteroid(pygame.sprite.Sprite):
         center = self.size // 2
         radius = self.size // 2 - 4
 
-        # Irregular circle
         points = []
         for i in range(12):
             angle = i * (360 / 12)
@@ -441,11 +532,10 @@ class GiantAsteroid(pygame.sprite.Sprite):
         pygame.draw.polygon(surface, DARK_GRAY, points)
         pygame.draw.polygon(surface, WHITE, points, 3)
 
-        # Craters
         for _ in range(3):
             cx = center + random.randint(-radius//2, radius//2)
             cy = center + random.randint(-radius//2, radius//2)
-            cr = random.randint(8, 15)
+            cr = random.randint(6, 12)
             pygame.draw.circle(surface, GRAY, (cx, cy), cr)
             pygame.draw.circle(surface, DARK_GRAY, (cx, cy), cr, 2)
 
@@ -493,7 +583,6 @@ class Game:
         self.font_large = pygame.font.Font(None, 64)
         self.show_fps = True
 
-        # Touch controls and pause menu
         self.touch_controls = TouchControls()
         self.pause_menu = PauseMenu()
 
@@ -501,21 +590,17 @@ class Game:
 
     def reset(self):
         """Reset game state for a new game."""
-        # Sprite groups
         self.all_sprites = pygame.sprite.Group()
         self.bullets = pygame.sprite.Group()
         self.asteroids = pygame.sprite.Group()
         self.obstacles = pygame.sprite.Group()
 
-        # Player
         self.player = Player()
         self.all_sprites.add(self.player)
 
-        # Timers
         self.asteroid_timer = 0
         self.obstacle_timer = 0
 
-        # State
         self.game_over = False
         self.paused = False
 
@@ -536,13 +621,11 @@ class Game:
 
     def handle_collisions(self):
         """Handle all collision detection."""
-        # Bullets vs Asteroids
         hits = pygame.sprite.groupcollide(self.bullets, self.asteroids, True, False)
         for bullet, hit_asteroids in hits.items():
             for asteroid in hit_asteroids:
                 asteroid.take_damage()
 
-        # Bullets vs Obstacles
         for bullet in self.bullets:
             hit_obstacles = pygame.sprite.spritecollide(bullet, self.obstacles, False)
             for obstacle in hit_obstacles:
@@ -550,12 +633,10 @@ class Game:
                 if hasattr(obstacle, 'take_damage'):
                     obstacle.take_damage()
 
-        # Player vs Asteroids
         if pygame.sprite.spritecollide(self.player, self.asteroids, False,
                                         collided=lambda p, a: p.hitbox.colliderect(a.rect)):
             self.game_over = True
 
-        # Player vs Obstacles
         if pygame.sprite.spritecollide(self.player, self.obstacles, False,
                                         collided=lambda p, o: p.hitbox.colliderect(o.rect)):
             self.game_over = True
@@ -572,31 +653,26 @@ class Game:
 
         keys = pygame.key.get_pressed()
 
-        # Update touch controls
         mouse_pressed = pygame.mouse.get_pressed()[0]
         mouse_pos = pygame.mouse.get_pos()
         self.touch_controls.update(mouse_pressed, mouse_pos)
 
-        # Update player with both keyboard and touch input
         self.player.update(
             keys,
             touch_left=self.touch_controls.moving_left,
             touch_right=self.touch_controls.moving_right
         )
 
-        # Shooting (keyboard or touch)
         shooting = keys[pygame.K_SPACE] or self.touch_controls.firing
         if shooting and self.player.can_shoot():
             bullet = self.player.shoot()
             self.bullets.add(bullet)
             self.all_sprites.add(bullet)
 
-        # Update all sprites
         self.bullets.update()
         self.asteroids.update()
         self.obstacles.update()
 
-        # Spawn timers
         self.asteroid_timer += 1
         if self.asteroid_timer >= ASTEROID_SPAWN_RATE:
             self.spawn_asteroid()
@@ -607,30 +683,31 @@ class Game:
             self.spawn_obstacle()
             self.obstacle_timer = 0
 
-        # Collisions
         self.handle_collisions()
 
     def draw(self):
         """Draw everything to the screen."""
         self.screen.fill(BLACK)
+
+        # Draw play area boundary (subtle)
+        pygame.draw.line(self.screen, DARK_GRAY, (150, 0), (150, SCREEN_HEIGHT), 1)
+        pygame.draw.line(self.screen, DARK_GRAY, (SCREEN_WIDTH - 150, 0),
+                        (SCREEN_WIDTH - 150, SCREEN_HEIGHT), 1)
+
         self.all_sprites.draw(self.screen)
 
-        # Touch controls (always visible during gameplay)
         if not self.game_over:
             self.touch_controls.draw(self.screen)
 
-        # FPS display
         if self.show_fps:
             fps = int(self.clock.get_fps())
             color = GREEN if fps >= 55 else YELLOW if fps >= 30 else RED
             fps_text = self.font.render(f"FPS: {fps}", True, color)
-            self.screen.blit(fps_text, (10, 10))
+            self.screen.blit(fps_text, (SCREEN_WIDTH // 2 - fps_text.get_width() // 2, 10))
 
-        # Pause menu
         if self.paused:
             self.pause_menu.draw(self.screen)
 
-        # Game over screen
         if self.game_over:
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 128))
@@ -638,16 +715,11 @@ class Game:
 
             text = self.font_large.render("GAME OVER", True, RED)
             self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2,
-                                    SCREEN_HEIGHT // 2 - 50))
+                                    SCREEN_HEIGHT // 2 - 40))
 
-            restart_text = self.font.render("Press R to restart", True, WHITE)
+            restart_text = self.font.render("Press R or tap to restart", True, WHITE)
             self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2,
                                             SCREEN_HEIGHT // 2 + 20))
-
-            # Touch-friendly restart button
-            tap_text = self.font.render("or tap here", True, WHITE)
-            self.screen.blit(tap_text, (SCREEN_WIDTH // 2 - tap_text.get_width() // 2,
-                                        SCREEN_HEIGHT // 2 + 50))
 
         pygame.display.flip()
 
@@ -655,7 +727,6 @@ class Game:
         """Main game loop."""
         running = True
         while running:
-            # Event handling
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -674,7 +745,6 @@ class Game:
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     pos = event.pos
 
-                    # Handle pause menu clicks
                     if self.paused:
                         action = self.pause_menu.handle_click(pos)
                         if action == 'resume':
@@ -682,11 +752,9 @@ class Game:
                         elif action == 'quit':
                             running = False
 
-                    # Handle game over tap to restart
                     elif self.game_over:
                         self.reset()
 
-                    # Handle pause button during gameplay
                     elif self.touch_controls.check_pause_tap(pos):
                         self.toggle_pause()
 

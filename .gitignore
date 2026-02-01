@@ -27,3 +27,10 @@ Thumbs.db
 # Game saves and logs
 *.log
 saves/
+
+# Personal testing docs (not for repo)
+TESTING_IPHONE.md
+
+# Pygbag build output
+build/
+__PYGBAG__/

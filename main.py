@@ -99,6 +99,9 @@ TOUCH_BUTTON_ALPHA = 150
 # Invincibility after hit (frames)
 INVINCIBILITY_FRAMES = 60
 
+# Level progression
+LEVEL_DURATION = 7200  # 2 minutes at 60 FPS
+
 
 # --- UI Classes ---
 
@@ -137,6 +140,53 @@ class HealthBar:
 
         # Border
         pygame.draw.rect(surface, WHITE, self.rect, self.border_width)
+
+
+class ProgressTracker:
+    """Vertical progress bar showing journey to space station."""
+
+    def __init__(self, x, y, height):
+        self.x = x
+        self.y = y
+        self.height = height
+        self.width = 20
+        self.ship_size = 12
+        self.station_size = 16
+
+    def draw(self, surface, progress):
+        """Draw the progress tracker with ship and station icons."""
+        # Progress line (vertical)
+        line_x = self.x + self.width // 2
+        line_top = self.y + self.station_size + 5
+        line_bottom = self.y + self.height - self.ship_size - 5
+
+        pygame.draw.line(surface, DARK_GRAY, (line_x, line_top), (line_x, line_bottom), 2)
+
+        # Station icon at top (destination)
+        station_y = self.y + self.station_size // 2
+        # Central hub
+        pygame.draw.circle(surface, GRAY, (line_x, station_y), self.station_size // 2)
+        pygame.draw.circle(surface, WHITE, (line_x, station_y), self.station_size // 2, 1)
+        # Arms
+        arm_len = self.station_size // 2 + 4
+        pygame.draw.line(surface, WHITE, (line_x - arm_len, station_y), (line_x + arm_len, station_y), 2)
+        pygame.draw.line(surface, WHITE, (line_x, station_y - arm_len), (line_x, station_y + arm_len), 2)
+
+        # Mini ship icon (current progress)
+        ship_y = line_bottom - int((line_bottom - line_top) * progress)
+        ship_points = [
+            (line_x, ship_y - self.ship_size // 2),
+            (line_x - self.ship_size // 3, ship_y + self.ship_size // 2),
+            (line_x + self.ship_size // 3, ship_y + self.ship_size // 2),
+        ]
+        pygame.draw.polygon(surface, BLUE, ship_points)
+        pygame.draw.polygon(surface, WHITE, ship_points, 1)
+
+        # Progress percentage
+        percent = int(progress * 100)
+        font = pygame.font.Font(None, 18)
+        text = font.render(f"{percent}%", True, WHITE)
+        surface.blit(text, (self.x + self.width // 2 - text.get_width() // 2, self.y + self.height + 2))
 
 
 class VirtualJoystick:
@@ -236,18 +286,20 @@ class TouchControls:
     """Manages all on-screen touch controls."""
 
     def __init__(self):
-        # Joystick in left panel (bottom)
-        joystick_y = SCREEN_HEIGHT - JOYSTICK_RADIUS - 20
+        # Common Y position for joystick and fire button (level with each other)
+        controls_y = SCREEN_HEIGHT - 80  # Near bottom but with some margin
+
+        # Joystick in left panel
         self.joystick = VirtualJoystick(
             LEFT_PANEL_WIDTH // 2,
-            joystick_y
+            controls_y
         )
 
-        # Fire button in right panel (centered vertically)
+        # Fire button in right panel (level with joystick)
         fire_radius = 30
         self.fire_btn = TouchButton(
             SCREEN_WIDTH - RIGHT_PANEL_WIDTH // 2 - fire_radius,
-            SCREEN_HEIGHT // 2 - fire_radius,
+            controls_y - fire_radius,
             fire_radius * 2, fire_radius * 2,
             "FIRE", RED, radius=fire_radius
         )
@@ -575,6 +627,94 @@ class GiantAsteroid(pygame.sprite.Sprite):
             self.kill()
 
 
+class SpaceStation(pygame.sprite.Sprite):
+    """Space station - destination for level completion."""
+
+    def __init__(self):
+        super().__init__()
+        self.width = 200
+        self.height = 150
+        self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        self._draw_station()
+        self.rect = self.image.get_rect()
+        # Spawn centered at top of play area
+        self.rect.centerx = PLAY_AREA_X + PLAY_AREA_WIDTH // 2
+        self.rect.bottom = 0
+        self.speed = 1  # Slow descent
+
+    def _draw_station(self):
+        """Draw a space station with central hub and extending arms."""
+        cx, cy = self.width // 2, self.height // 2
+
+        # Central hub (large circle)
+        hub_radius = 35
+        pygame.draw.circle(self.image, GRAY, (cx, cy), hub_radius)
+        pygame.draw.circle(self.image, WHITE, (cx, cy), hub_radius, 3)
+
+        # Inner hub detail
+        pygame.draw.circle(self.image, DARK_GRAY, (cx, cy), hub_radius - 10)
+        pygame.draw.circle(self.image, BLUE, (cx, cy), 12)
+        pygame.draw.circle(self.image, WHITE, (cx, cy), 12, 2)
+
+        # Horizontal arm
+        arm_width = 160
+        arm_height = 20
+        arm_rect = pygame.Rect(cx - arm_width // 2, cy - arm_height // 2, arm_width, arm_height)
+        pygame.draw.rect(self.image, GRAY, arm_rect)
+        pygame.draw.rect(self.image, WHITE, arm_rect, 2)
+
+        # Arm end modules
+        module_size = 30
+        # Left module
+        left_module = pygame.Rect(cx - arm_width // 2 - 5, cy - module_size // 2, module_size, module_size)
+        pygame.draw.rect(self.image, DARK_GRAY, left_module)
+        pygame.draw.rect(self.image, WHITE, left_module, 2)
+        # Right module
+        right_module = pygame.Rect(cx + arm_width // 2 - module_size + 5, cy - module_size // 2, module_size, module_size)
+        pygame.draw.rect(self.image, DARK_GRAY, right_module)
+        pygame.draw.rect(self.image, WHITE, right_module, 2)
+
+        # Vertical arm (shorter)
+        vert_width = 16
+        vert_height = 100
+        vert_rect = pygame.Rect(cx - vert_width // 2, cy - vert_height // 2, vert_width, vert_height)
+        pygame.draw.rect(self.image, GRAY, vert_rect)
+        pygame.draw.rect(self.image, WHITE, vert_rect, 2)
+
+        # Top and bottom modules
+        top_module = pygame.Rect(cx - module_size // 2, cy - vert_height // 2 - module_size + 5, module_size, module_size)
+        pygame.draw.rect(self.image, DARK_GRAY, top_module)
+        pygame.draw.rect(self.image, WHITE, top_module, 2)
+
+        bottom_module = pygame.Rect(cx - module_size // 2, cy + vert_height // 2 - 5, module_size, module_size)
+        pygame.draw.rect(self.image, DARK_GRAY, bottom_module)
+        pygame.draw.rect(self.image, WHITE, bottom_module, 2)
+
+        # Docking port (at bottom) - where player docks
+        dock_width = 40
+        dock_height = 15
+        dock_rect = pygame.Rect(cx - dock_width // 2, cy + vert_height // 2 + module_size - 10, dock_width, dock_height)
+        pygame.draw.rect(self.image, GREEN, dock_rect)
+        pygame.draw.rect(self.image, WHITE, dock_rect, 2)
+
+        # Solar panels on arm ends
+        panel_width = 25
+        panel_height = 50
+        # Left panels
+        left_panel = pygame.Rect(cx - arm_width // 2 - panel_width - 5, cy - panel_height // 2, panel_width, panel_height)
+        pygame.draw.rect(self.image, (50, 50, 150), left_panel)
+        pygame.draw.rect(self.image, WHITE, left_panel, 1)
+        # Right panels
+        right_panel = pygame.Rect(cx + arm_width // 2 + 5, cy - panel_height // 2, panel_width, panel_height)
+        pygame.draw.rect(self.image, (50, 50, 150), right_panel)
+        pygame.draw.rect(self.image, WHITE, right_panel, 1)
+
+    def update(self):
+        """Move station slowly downward."""
+        if self.rect.top < 50:  # Stop when partially in view
+            self.rect.y += self.speed
+
+
 # --- Game Class ---
 
 class Game:
@@ -596,6 +736,12 @@ class Game:
         health_bar_height = SCREEN_HEIGHT - 120  # Leave room for joystick
         self.health_bar = HealthBar(10, 10, LEFT_PANEL_WIDTH - 20, health_bar_height)
 
+        # Progress tracker in right panel (between pause button and fire button)
+        tracker_x = SCREEN_WIDTH - RIGHT_PANEL_WIDTH // 2 - 10
+        tracker_y = 50  # Below pause button
+        tracker_height = 130  # Space between pause and fire buttons
+        self.progress_tracker = ProgressTracker(tracker_x, tracker_y, tracker_height)
+
         self.reset()
 
     def reset(self):
@@ -616,6 +762,13 @@ class Game:
 
         self.game_over = False
         self.paused = False
+
+        # Level progression
+        self.level_timer = 0
+        self.level_complete = False
+        self.arriving = False
+        self.docking = False  # Auto-pilot to station
+        self.station = None
 
     def spawn_asteroid(self):
         """Spawn a new asteroid."""
@@ -686,7 +839,7 @@ class Game:
 
     def update(self):
         """Update game state."""
-        if self.game_over or self.paused:
+        if self.game_over or self.paused or self.level_complete:
             return
 
         keys = pygame.key.get_pressed()
@@ -694,6 +847,32 @@ class Game:
         mouse_pressed = pygame.mouse.get_pressed()[0]
         mouse_pos = pygame.mouse.get_pos()
         self.touch_controls.update(mouse_pressed, mouse_pos)
+
+        # Handle docking sequence (auto-pilot)
+        if self.docking:
+            # Auto-fly player toward station
+            target_x = self.station.rect.centerx
+            target_y = self.station.rect.bottom + 20  # Just below station
+
+            # Move horizontally toward station center
+            if abs(self.player.rect.centerx - target_x) > PLAYER_SPEED:
+                if self.player.rect.centerx < target_x:
+                    self.player.rect.x += PLAYER_SPEED
+                else:
+                    self.player.rect.x -= PLAYER_SPEED
+            else:
+                self.player.rect.centerx = target_x
+
+            # Move upward toward station
+            if self.player.rect.top > target_y:
+                self.player.rect.y -= PLAYER_SPEED // 2
+
+            self.player.hitbox.center = self.player.rect.center
+
+            # Check if player reached station
+            if self.player.hitbox.colliderect(self.station.rect):
+                self.level_complete = True
+            return
 
         self.player.update(
             keys,
@@ -711,15 +890,34 @@ class Game:
         self.asteroids.update()
         self.obstacles.update()
 
-        self.asteroid_timer += 1
-        if self.asteroid_timer >= ASTEROID_SPAWN_RATE:
-            self.spawn_asteroid()
-            self.asteroid_timer = 0
+        # Level progression timer
+        self.level_timer += 1
+        progress = min(1.0, self.level_timer / LEVEL_DURATION)
 
-        self.obstacle_timer += 1
-        if self.obstacle_timer >= OBSTACLE_SPAWN_RATE:
-            self.spawn_obstacle()
-            self.obstacle_timer = 0
+        # Check if station should arrive
+        if progress >= 1.0 and not self.arriving:
+            self.arriving = True
+            self.station = SpaceStation()
+            self.all_sprites.add(self.station)
+
+        # Update station and check if fully in view for auto-docking
+        if self.station:
+            self.station.update()
+            # Start auto-docking when station is fully in view (stopped descending)
+            if self.station.rect.top >= 50 and not self.docking:
+                self.docking = True
+
+        # Only spawn obstacles before station arrives
+        if not self.arriving:
+            self.asteroid_timer += 1
+            if self.asteroid_timer >= ASTEROID_SPAWN_RATE:
+                self.spawn_asteroid()
+                self.asteroid_timer = 0
+
+            self.obstacle_timer += 1
+            if self.obstacle_timer >= OBSTACLE_SPAWN_RATE:
+                self.spawn_obstacle()
+                self.obstacle_timer = 0
 
         self.handle_collisions()
 
@@ -753,8 +951,12 @@ class Game:
         score_text = self.font_score.render(f"${self.score}", True, GREEN)
         self.screen.blit(score_text, (PLAY_AREA_X + 10, 10))
 
+        # Draw progress tracker
+        progress = min(1.0, self.level_timer / LEVEL_DURATION)
+        self.progress_tracker.draw(self.screen, progress)
+
         # Draw touch controls
-        if not self.game_over:
+        if not self.game_over and not self.level_complete:
             self.touch_controls.draw(self.screen)
 
         # Draw FPS
@@ -786,6 +988,36 @@ class Game:
             self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2,
                                             SCREEN_HEIGHT // 2 + 40))
 
+        # Draw level complete overlay
+        if self.level_complete:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            self.screen.blit(overlay, (0, 0))
+
+            text = self.font_large.render("DELIVERY COMPLETE!", True, GREEN)
+            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2,
+                                    SCREEN_HEIGHT // 2 - 80))
+
+            # Calculate health bonus
+            health_bonus = int(self.health * 10)
+            final_score = self.score + health_bonus
+
+            score_text = self.font_score.render(f"Delivery Pay: ${self.score}", True, WHITE)
+            self.screen.blit(score_text, (SCREEN_WIDTH // 2 - score_text.get_width() // 2,
+                                          SCREEN_HEIGHT // 2 - 20))
+
+            bonus_text = self.font_score.render(f"Health Bonus: ${health_bonus}", True, YELLOW)
+            self.screen.blit(bonus_text, (SCREEN_WIDTH // 2 - bonus_text.get_width() // 2,
+                                          SCREEN_HEIGHT // 2 + 15))
+
+            final_text = self.font_score.render(f"Total: ${final_score}", True, GREEN)
+            self.screen.blit(final_text, (SCREEN_WIDTH // 2 - final_text.get_width() // 2,
+                                          SCREEN_HEIGHT // 2 + 50))
+
+            restart_text = self.font.render("Press R or tap to play again", True, WHITE)
+            self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2,
+                                            SCREEN_HEIGHT // 2 + 95))
+
         pygame.display.flip()
 
     def run(self):
@@ -800,9 +1032,9 @@ class Game:
                     if event.key == pygame.K_ESCAPE or event.key == pygame.K_p:
                         if self.paused:
                             self.paused = False
-                        elif not self.game_over:
+                        elif not self.game_over and not self.level_complete:
                             self.toggle_pause()
-                    elif event.key == pygame.K_r and self.game_over:
+                    elif event.key == pygame.K_r and (self.game_over or self.level_complete):
                         self.reset()
                     elif event.key == pygame.K_f:
                         self.show_fps = not self.show_fps
@@ -817,7 +1049,7 @@ class Game:
                         elif action == 'quit':
                             running = False
 
-                    elif self.game_over:
+                    elif self.game_over or self.level_complete:
                         self.reset()
 
                     elif self.touch_controls.check_pause_tap(pos):

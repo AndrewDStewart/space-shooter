@@ -6,13 +6,18 @@ Controls:
         Left/Right Arrow Keys: Move ship
         Space: Shoot
         P or ESC: Pause game
-        R: Restart after game over
+        R: Retry level (after game over)
+        Enter/Space: Proceed through menus
         F: Toggle FPS display
 
     Touch/Mouse:
         Virtual joystick (left panel): Move ship
         Fire button (right panel): Shoot
         Pause button: Pause game
+        Menu buttons: Navigate menus
+
+Game Flow:
+    Main Menu -> Level Select -> Play Level -> Level Complete/Game Over -> Level Select
 """
 
 import pygame
@@ -101,6 +106,29 @@ INVINCIBILITY_FRAMES = 60
 
 # Level progression
 LEVEL_DURATION = 7200  # 2 minutes at 60 FPS
+
+
+# --- Game State ---
+
+class GameState:
+    """Game state constants."""
+    MENU = "menu"
+    LEVEL_SELECT = "level_select"
+    PLAYING = "playing"
+    LEVEL_COMPLETE = "level_complete"
+    GAME_OVER = "game_over"
+
+
+# Level definitions
+LEVELS = {
+    "1-1": {"name": "Training Run", "duration": 7200, "asteroid_rate": 80, "obstacle_rate": 240},
+    "1-2": {"name": "Light Traffic", "duration": 7200, "asteroid_rate": 70, "obstacle_rate": 200},
+    "1-3": {"name": "Busy Route", "duration": 7200, "asteroid_rate": 60, "obstacle_rate": 180},
+    "1-4": {"name": "Danger Zone", "duration": 7200, "asteroid_rate": 50, "obstacle_rate": 150},
+    "1-5": {"name": "Gauntlet", "duration": 7200, "asteroid_rate": 40, "obstacle_rate": 120},
+}
+
+LEVEL_ORDER = ["1-1", "1-2", "1-3", "1-4", "1-5"]
 
 
 # --- UI Classes ---
@@ -357,10 +385,13 @@ class PauseMenu:
         btn_x = SCREEN_WIDTH // 2 - btn_width // 2
         center_y = SCREEN_HEIGHT // 2
 
-        self.resume_btn = TouchButton(btn_x, center_y - 30, btn_width, btn_height, "RESUME", GREEN)
+        self.resume_btn = TouchButton(btn_x, center_y - 60, btn_width, btn_height, "RESUME", GREEN)
         self.resume_btn.font = self.font_medium
 
-        self.quit_btn = TouchButton(btn_x, center_y + 40, btn_width, btn_height, "QUIT", RED)
+        self.restart_btn = TouchButton(btn_x, center_y + 10, btn_width, btn_height, "RESTART", YELLOW)
+        self.restart_btn.font = self.font_medium
+
+        self.quit_btn = TouchButton(btn_x, center_y + 80, btn_width, btn_height, "QUIT", RED)
         self.quit_btn.font = self.font_medium
 
     def draw(self, surface):
@@ -370,18 +401,224 @@ class PauseMenu:
         surface.blit(overlay, (0, 0))
 
         title = self.font_large.render("PAUSED", True, WHITE)
-        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, SCREEN_HEIGHT // 2 - 100))
+        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, SCREEN_HEIGHT // 2 - 130))
 
         self.resume_btn.draw(surface)
+        self.restart_btn.draw(surface)
         self.quit_btn.draw(surface)
 
     def handle_click(self, pos):
         """Handle click on menu."""
         if self.resume_btn.check_press(pos):
             return 'resume'
+        elif self.restart_btn.check_press(pos):
+            return 'restart'
         elif self.quit_btn.check_press(pos):
             return 'quit'
         return None
+
+
+class LevelSelectScreen:
+    """Level selection screen."""
+
+    def __init__(self):
+        self.font_title = pygame.font.Font(None, 64)
+        self.font_level = pygame.font.Font(None, 36)
+        self.font_name = pygame.font.Font(None, 24)
+        self.font_btn = pygame.font.Font(None, 28)
+        self.level_buttons = {}
+        self._create_buttons()
+        # Back button
+        self.back_btn = pygame.Rect(20, SCREEN_HEIGHT - 50, 80, 35)
+
+    def _create_buttons(self):
+        """Create level selection buttons."""
+        start_x = SCREEN_WIDTH // 2 - 150
+        start_y = 120
+        btn_size = 80
+        gap = 20
+
+        for i, level_id in enumerate(LEVEL_ORDER):
+            row = i // 3
+            col = i % 3
+            x = start_x + col * (btn_size + gap)
+            y = start_y + row * (btn_size + gap + 30)
+            self.level_buttons[level_id] = pygame.Rect(x, y, btn_size, btn_size)
+
+    def draw(self, surface, unlocked_levels, completed_levels):
+        """Draw the level select screen."""
+        surface.fill(BLACK)
+
+        # Title
+        title = self.font_title.render("WORLD 1", True, WHITE)
+        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 40))
+
+        # Level buttons
+        for level_id, rect in self.level_buttons.items():
+            level_data = LEVELS[level_id]
+            is_unlocked = level_id in unlocked_levels
+            is_completed = level_id in completed_levels
+
+            # Button background
+            if is_completed:
+                color = DARK_GREEN
+            elif is_unlocked:
+                color = DARK_GRAY
+            else:
+                color = (40, 40, 40)
+
+            pygame.draw.rect(surface, color, rect, border_radius=10)
+            pygame.draw.rect(surface, WHITE if is_unlocked else GRAY, rect, 2, border_radius=10)
+
+            # Level number
+            level_text = self.font_level.render(level_id, True, WHITE if is_unlocked else GRAY)
+            surface.blit(level_text, (rect.centerx - level_text.get_width() // 2,
+                                      rect.centery - level_text.get_height() // 2 - 5))
+
+            # Status icon
+            if is_completed:
+                check = self.font_name.render("✓", True, GREEN)
+                surface.blit(check, (rect.centerx - check.get_width() // 2, rect.bottom - 25))
+            elif not is_unlocked:
+                lock = self.font_name.render("🔒", True, GRAY)
+                surface.blit(lock, (rect.centerx - lock.get_width() // 2, rect.bottom - 25))
+
+            # Level name below button
+            name_text = self.font_name.render(level_data["name"], True, WHITE if is_unlocked else GRAY)
+            surface.blit(name_text, (rect.centerx - name_text.get_width() // 2, rect.bottom + 5))
+
+        # Back button
+        pygame.draw.rect(surface, DARK_GRAY, self.back_btn, border_radius=8)
+        pygame.draw.rect(surface, WHITE, self.back_btn, 2, border_radius=8)
+        back_text = self.font_btn.render("< Back", True, WHITE)
+        surface.blit(back_text, (self.back_btn.centerx - back_text.get_width() // 2,
+                                 self.back_btn.centery - back_text.get_height() // 2))
+
+    def handle_click(self, pos, unlocked_levels):
+        """Handle click on level select. Returns level_id, 'back', or None."""
+        if self.back_btn.collidepoint(pos):
+            return 'back'
+        for level_id, rect in self.level_buttons.items():
+            if rect.collidepoint(pos) and level_id in unlocked_levels:
+                return level_id
+        return None
+
+
+class LevelCompleteScreen:
+    """Level completion screen."""
+
+    def __init__(self):
+        self.font_title = pygame.font.Font(None, 56)
+        self.font_level = pygame.font.Font(None, 36)
+        self.font_score = pygame.font.Font(None, 32)
+        self.font_btn = pygame.font.Font(None, 28)
+
+        # Buttons
+        btn_width = 150
+        btn_height = 45
+        btn_y = SCREEN_HEIGHT - 100
+        gap = 20
+
+        self.next_btn = pygame.Rect(SCREEN_WIDTH // 2 - btn_width - gap // 2, btn_y, btn_width, btn_height)
+        self.select_btn = pygame.Rect(SCREEN_WIDTH // 2 + gap // 2, btn_y, btn_width, btn_height)
+
+    def draw(self, surface, level_id, base_score, health_bonus, has_next_level):
+        """Draw the level complete screen."""
+        # Semi-transparent overlay
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
+        surface.blit(overlay, (0, 0))
+
+        level_data = LEVELS.get(level_id, {"name": "Unknown"})
+        total = base_score + health_bonus
+
+        # Title
+        title = self.font_title.render("DELIVERY COMPLETE!", True, GREEN)
+        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 60))
+
+        # Level info
+        level_text = self.font_level.render(f"Level {level_id}: {level_data['name']}", True, WHITE)
+        surface.blit(level_text, (SCREEN_WIDTH // 2 - level_text.get_width() // 2, 130))
+
+        # Score breakdown
+        y_start = 180
+        line_height = 35
+
+        pay_text = self.font_score.render(f"Delivery Pay:  ${base_score}", True, WHITE)
+        surface.blit(pay_text, (SCREEN_WIDTH // 2 - pay_text.get_width() // 2, y_start))
+
+        bonus_text = self.font_score.render(f"Health Bonus:  ${health_bonus}", True, YELLOW)
+        surface.blit(bonus_text, (SCREEN_WIDTH // 2 - bonus_text.get_width() // 2, y_start + line_height))
+
+        # Divider line
+        line_y = y_start + line_height * 2
+        line_width = 200
+        pygame.draw.line(surface, WHITE,
+                        (SCREEN_WIDTH // 2 - line_width // 2, line_y),
+                        (SCREEN_WIDTH // 2 + line_width // 2, line_y), 2)
+
+        total_text = self.font_score.render(f"Total:         ${total}", True, GREEN)
+        surface.blit(total_text, (SCREEN_WIDTH // 2 - total_text.get_width() // 2, line_y + 15))
+
+        # Buttons
+        if has_next_level:
+            pygame.draw.rect(surface, DARK_GREEN, self.next_btn, border_radius=8)
+            pygame.draw.rect(surface, WHITE, self.next_btn, 2, border_radius=8)
+            next_text = self.font_btn.render("NEXT LEVEL", True, WHITE)
+            surface.blit(next_text, (self.next_btn.centerx - next_text.get_width() // 2,
+                                     self.next_btn.centery - next_text.get_height() // 2))
+
+        pygame.draw.rect(surface, DARK_GRAY, self.select_btn, border_radius=8)
+        pygame.draw.rect(surface, WHITE, self.select_btn, 2, border_radius=8)
+        select_text = self.font_btn.render("LEVEL SELECT", True, WHITE)
+        surface.blit(select_text, (self.select_btn.centerx - select_text.get_width() // 2,
+                                   self.select_btn.centery - select_text.get_height() // 2))
+
+    def handle_click(self, pos, has_next_level):
+        """Handle click. Returns 'next', 'select', or None."""
+        if has_next_level and self.next_btn.collidepoint(pos):
+            return 'next'
+        if self.select_btn.collidepoint(pos):
+            return 'select'
+        return None
+
+
+class MenuScreen:
+    """Simple title/menu screen."""
+
+    def __init__(self):
+        self.font_title = pygame.font.Font(None, 72)
+        self.font_subtitle = pygame.font.Font(None, 36)
+        self.font_btn = pygame.font.Font(None, 40)
+
+        btn_width = 200
+        btn_height = 60
+        self.start_btn = pygame.Rect(SCREEN_WIDTH // 2 - btn_width // 2,
+                                     SCREEN_HEIGHT // 2 + 40,
+                                     btn_width, btn_height)
+
+    def draw(self, surface):
+        """Draw the menu screen."""
+        surface.fill(BLACK)
+
+        # Title
+        title = self.font_title.render("SPACE DELIVERY", True, BLUE)
+        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 100))
+
+        # Subtitle
+        subtitle = self.font_subtitle.render("Navigate the asteroid field!", True, WHITE)
+        surface.blit(subtitle, (SCREEN_WIDTH // 2 - subtitle.get_width() // 2, 180))
+
+        # Start button
+        pygame.draw.rect(surface, DARK_GREEN, self.start_btn, border_radius=10)
+        pygame.draw.rect(surface, WHITE, self.start_btn, 3, border_radius=10)
+        btn_text = self.font_btn.render("START", True, WHITE)
+        surface.blit(btn_text, (self.start_btn.centerx - btn_text.get_width() // 2,
+                                self.start_btn.centery - btn_text.get_height() // 2))
+
+    def handle_click(self, pos):
+        """Handle click. Returns True if start button clicked."""
+        return self.start_btn.collidepoint(pos)
 
 
 # --- Sprite Classes ---
@@ -731,6 +968,9 @@ class Game:
 
         self.touch_controls = TouchControls()
         self.pause_menu = PauseMenu()
+        self.menu_screen = MenuScreen()
+        self.level_select_screen = LevelSelectScreen()
+        self.level_complete_screen = LevelCompleteScreen()
 
         # Health bar in left panel (above joystick)
         health_bar_height = SCREEN_HEIGHT - 120  # Leave room for joystick
@@ -742,10 +982,21 @@ class Game:
         tracker_height = 130  # Space between pause and fire buttons
         self.progress_tracker = ProgressTracker(tracker_x, tracker_y, tracker_height)
 
-        self.reset()
+        # Game state
+        self.game_state = GameState.MENU
+        self.current_level = None
+        self.completed_levels = set()
+        self.unlocked_levels = {"1-1"}
 
-    def reset(self):
-        """Reset game state."""
+        # Playing state variables
+        self.paused = False
+        self.arriving = False
+        self.docking = False
+
+        self._init_playing_state()
+
+    def _init_playing_state(self):
+        """Initialize playing state variables."""
         self.all_sprites = pygame.sprite.Group()
         self.bullets = pygame.sprite.Group()
         self.asteroids = pygame.sprite.Group()
@@ -760,15 +1011,45 @@ class Game:
         self.health = PLAYER_MAX_HEALTH
         self.score = PLAYER_START_SCORE
 
-        self.game_over = False
         self.paused = False
 
         # Level progression
         self.level_timer = 0
-        self.level_complete = False
         self.arriving = False
-        self.docking = False  # Auto-pilot to station
+        self.docking = False
         self.station = None
+
+        # Level-specific spawn rates (defaults)
+        self.asteroid_spawn_rate = ASTEROID_SPAWN_RATE
+        self.obstacle_spawn_rate = OBSTACLE_SPAWN_RATE
+        self.level_duration = LEVEL_DURATION
+
+    def start_level(self, level_id):
+        """Start a specific level."""
+        self.current_level = level_id
+        level_data = LEVELS[level_id]
+
+        # Reset playing state
+        self._init_playing_state()
+
+        # Apply level-specific settings
+        self.level_duration = level_data["duration"]
+        self.asteroid_spawn_rate = level_data["asteroid_rate"]
+        self.obstacle_spawn_rate = level_data["obstacle_rate"]
+
+        self.game_state = GameState.PLAYING
+
+    def get_next_level(self):
+        """Get the next level after current, or None if at end."""
+        if self.current_level is None:
+            return None
+        try:
+            idx = LEVEL_ORDER.index(self.current_level)
+            if idx + 1 < len(LEVEL_ORDER):
+                return LEVEL_ORDER[idx + 1]
+        except ValueError:
+            pass
+        return None
 
     def spawn_asteroid(self):
         """Spawn a new asteroid."""
@@ -826,7 +1107,7 @@ class Game:
         # Check for game over
         if self.health <= 0:
             self.health = 0
-            self.game_over = True
+            self.game_state = GameState.GAME_OVER
 
         # Keep score from going negative
         if self.score < 0:
@@ -834,12 +1115,41 @@ class Game:
 
     def toggle_pause(self):
         """Toggle pause state."""
-        if not self.game_over:
+        if self.game_state == GameState.PLAYING:
             self.paused = not self.paused
 
     def update(self):
-        """Update game state."""
-        if self.game_over or self.paused or self.level_complete:
+        """Update game state based on current state."""
+        if self.game_state == GameState.MENU:
+            self.update_menu()
+        elif self.game_state == GameState.LEVEL_SELECT:
+            self.update_level_select()
+        elif self.game_state == GameState.PLAYING:
+            self.update_playing()
+        elif self.game_state == GameState.LEVEL_COMPLETE:
+            self.update_level_complete()
+        elif self.game_state == GameState.GAME_OVER:
+            self.update_game_over()
+
+    def update_menu(self):
+        """Update menu state."""
+        pass  # Menu is static, handled by events
+
+    def update_level_select(self):
+        """Update level select state."""
+        pass  # Level select is static, handled by events
+
+    def update_level_complete(self):
+        """Update level complete state."""
+        pass  # Level complete is static, handled by events
+
+    def update_game_over(self):
+        """Update game over state."""
+        pass  # Game over is static, handled by events
+
+    def update_playing(self):
+        """Update playing state."""
+        if self.paused:
             return
 
         keys = pygame.key.get_pressed()
@@ -850,9 +1160,10 @@ class Game:
 
         # Handle docking sequence (auto-pilot)
         if self.docking:
-            # Auto-fly player toward station
+            # Auto-fly player toward station docking port
             target_x = self.station.rect.centerx
-            target_y = self.station.rect.bottom + 20  # Just below station
+            # Target is inside the station's rect so collision triggers
+            target_y = self.station.rect.bottom - 30
 
             # Move horizontally toward station center
             if abs(self.player.rect.centerx - target_x) > PLAYER_SPEED:
@@ -869,9 +1180,9 @@ class Game:
 
             self.player.hitbox.center = self.player.rect.center
 
-            # Check if player reached station
-            if self.player.hitbox.colliderect(self.station.rect):
-                self.level_complete = True
+            # Check if player reached docking position
+            if self.player.rect.top <= target_y and self.player.rect.centerx == target_x:
+                self.complete_level()
             return
 
         self.player.update(
@@ -892,13 +1203,20 @@ class Game:
 
         # Level progression timer
         self.level_timer += 1
-        progress = min(1.0, self.level_timer / LEVEL_DURATION)
+        progress = min(1.0, self.level_timer / self.level_duration)
 
         # Check if station should arrive
         if progress >= 1.0 and not self.arriving:
             self.arriving = True
             self.station = SpaceStation()
             self.all_sprites.add(self.station)
+            # Clear remaining obstacles for safe docking approach
+            for asteroid in self.asteroids:
+                asteroid.kill()
+            for obstacle in self.obstacles:
+                obstacle.kill()
+            # Make player invincible during approach
+            self.player.invincible = 9999
 
         # Update station and check if fully in view for auto-docking
         if self.station:
@@ -910,19 +1228,55 @@ class Game:
         # Only spawn obstacles before station arrives
         if not self.arriving:
             self.asteroid_timer += 1
-            if self.asteroid_timer >= ASTEROID_SPAWN_RATE:
+            if self.asteroid_timer >= self.asteroid_spawn_rate:
                 self.spawn_asteroid()
                 self.asteroid_timer = 0
 
             self.obstacle_timer += 1
-            if self.obstacle_timer >= OBSTACLE_SPAWN_RATE:
+            if self.obstacle_timer >= self.obstacle_spawn_rate:
                 self.spawn_obstacle()
                 self.obstacle_timer = 0
 
         self.handle_collisions()
 
+    def complete_level(self):
+        """Called when player successfully completes a level."""
+        self.completed_levels.add(self.current_level)
+
+        # Unlock next level
+        next_level = self.get_next_level()
+        if next_level:
+            self.unlocked_levels.add(next_level)
+
+        self.game_state = GameState.LEVEL_COMPLETE
+
     def draw(self):
-        """Draw everything to the screen."""
+        """Draw based on current game state."""
+        if self.game_state == GameState.MENU:
+            self.draw_menu()
+        elif self.game_state == GameState.LEVEL_SELECT:
+            self.draw_level_select()
+        elif self.game_state == GameState.PLAYING:
+            self.draw_playing()
+        elif self.game_state == GameState.LEVEL_COMPLETE:
+            self.draw_playing()  # Draw game background
+            self.draw_level_complete()
+        elif self.game_state == GameState.GAME_OVER:
+            self.draw_playing()  # Draw game background
+            self.draw_game_over()
+
+        pygame.display.flip()
+
+    def draw_menu(self):
+        """Draw menu screen."""
+        self.menu_screen.draw(self.screen)
+
+    def draw_level_select(self):
+        """Draw level select screen."""
+        self.level_select_screen.draw(self.screen, self.unlocked_levels, self.completed_levels)
+
+    def draw_playing(self):
+        """Draw playing state."""
         # Clear screen
         self.screen.fill(BLACK)
 
@@ -951,12 +1305,17 @@ class Game:
         score_text = self.font_score.render(f"${self.score}", True, GREEN)
         self.screen.blit(score_text, (PLAY_AREA_X + 10, 10))
 
+        # Draw level indicator
+        if self.current_level:
+            level_text = self.font.render(f"Level {self.current_level}", True, WHITE)
+            self.screen.blit(level_text, (PLAY_AREA_X + 10, 45))
+
         # Draw progress tracker
-        progress = min(1.0, self.level_timer / LEVEL_DURATION)
+        progress = min(1.0, self.level_timer / self.level_duration)
         self.progress_tracker.draw(self.screen, progress)
 
-        # Draw touch controls
-        if not self.game_over and not self.level_complete:
+        # Draw touch controls (only during active play)
+        if self.game_state == GameState.PLAYING and not self.paused:
             self.touch_controls.draw(self.screen)
 
         # Draw FPS
@@ -970,55 +1329,46 @@ class Game:
         if self.paused:
             self.pause_menu.draw(self.screen)
 
-        # Draw game over
-        if self.game_over:
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 128))
-            self.screen.blit(overlay, (0, 0))
+    def draw_level_complete(self):
+        """Draw level complete overlay."""
+        health_bonus = int(self.health * 10)
+        has_next = self.get_next_level() is not None
+        self.level_complete_screen.draw(self.screen, self.current_level, self.score, health_bonus, has_next)
 
-            text = self.font_large.render("DELIVERY FAILED", True, RED)
-            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2,
-                                    SCREEN_HEIGHT // 2 - 60))
+    def draw_game_over(self):
+        """Draw game over overlay."""
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
 
-            final_score = self.font_score.render(f"Final Score: ${self.score}", True, WHITE)
-            self.screen.blit(final_score, (SCREEN_WIDTH // 2 - final_score.get_width() // 2,
-                                           SCREEN_HEIGHT // 2))
+        text = self.font_large.render("DELIVERY FAILED", True, RED)
+        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2,
+                                SCREEN_HEIGHT // 2 - 100))
 
-            restart_text = self.font.render("Press R or tap to restart", True, WHITE)
-            self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2,
-                                            SCREEN_HEIGHT // 2 + 40))
+        final_score = self.font_score.render(f"Final Score: ${self.score}", True, WHITE)
+        self.screen.blit(final_score, (SCREEN_WIDTH // 2 - final_score.get_width() // 2,
+                                       SCREEN_HEIGHT // 2 - 40))
 
-        # Draw level complete overlay
-        if self.level_complete:
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 180))
-            self.screen.blit(overlay, (0, 0))
+        # Buttons
+        btn_width = 150
+        btn_height = 45
+        btn_y = SCREEN_HEIGHT // 2 + 20
+        gap = 20
 
-            text = self.font_large.render("DELIVERY COMPLETE!", True, GREEN)
-            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2,
-                                    SCREEN_HEIGHT // 2 - 80))
+        self.retry_btn = pygame.Rect(SCREEN_WIDTH // 2 - btn_width - gap // 2, btn_y, btn_width, btn_height)
+        self.select_btn_gameover = pygame.Rect(SCREEN_WIDTH // 2 + gap // 2, btn_y, btn_width, btn_height)
 
-            # Calculate health bonus
-            health_bonus = int(self.health * 10)
-            final_score = self.score + health_bonus
+        pygame.draw.rect(self.screen, DARK_GREEN, self.retry_btn, border_radius=8)
+        pygame.draw.rect(self.screen, WHITE, self.retry_btn, 2, border_radius=8)
+        retry_text = self.font.render("RETRY", True, WHITE)
+        self.screen.blit(retry_text, (self.retry_btn.centerx - retry_text.get_width() // 2,
+                                      self.retry_btn.centery - retry_text.get_height() // 2))
 
-            score_text = self.font_score.render(f"Delivery Pay: ${self.score}", True, WHITE)
-            self.screen.blit(score_text, (SCREEN_WIDTH // 2 - score_text.get_width() // 2,
-                                          SCREEN_HEIGHT // 2 - 20))
-
-            bonus_text = self.font_score.render(f"Health Bonus: ${health_bonus}", True, YELLOW)
-            self.screen.blit(bonus_text, (SCREEN_WIDTH // 2 - bonus_text.get_width() // 2,
-                                          SCREEN_HEIGHT // 2 + 15))
-
-            final_text = self.font_score.render(f"Total: ${final_score}", True, GREEN)
-            self.screen.blit(final_text, (SCREEN_WIDTH // 2 - final_text.get_width() // 2,
-                                          SCREEN_HEIGHT // 2 + 50))
-
-            restart_text = self.font.render("Press R or tap to play again", True, WHITE)
-            self.screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2,
-                                            SCREEN_HEIGHT // 2 + 95))
-
-        pygame.display.flip()
+        pygame.draw.rect(self.screen, DARK_GRAY, self.select_btn_gameover, border_radius=8)
+        pygame.draw.rect(self.screen, WHITE, self.select_btn_gameover, 2, border_radius=8)
+        select_text = self.font.render("LEVEL SELECT", True, WHITE)
+        self.screen.blit(select_text, (self.select_btn_gameover.centerx - select_text.get_width() // 2,
+                                       self.select_btn_gameover.centery - select_text.get_height() // 2))
 
     def run(self):
         """Main game loop."""
@@ -1029,31 +1379,10 @@ class Game:
                     running = False
 
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE or event.key == pygame.K_p:
-                        if self.paused:
-                            self.paused = False
-                        elif not self.game_over and not self.level_complete:
-                            self.toggle_pause()
-                    elif event.key == pygame.K_r and (self.game_over or self.level_complete):
-                        self.reset()
-                    elif event.key == pygame.K_f:
-                        self.show_fps = not self.show_fps
+                    running = self.handle_keydown(event, running)
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    pos = event.pos
-
-                    if self.paused:
-                        action = self.pause_menu.handle_click(pos)
-                        if action == 'resume':
-                            self.paused = False
-                        elif action == 'quit':
-                            running = False
-
-                    elif self.game_over or self.level_complete:
-                        self.reset()
-
-                    elif self.touch_controls.check_pause_tap(pos):
-                        self.toggle_pause()
+                    running = self.handle_mousedown(event, running)
 
             self.update()
             self.draw()
@@ -1061,6 +1390,91 @@ class Game:
 
         pygame.quit()
         sys.exit()
+
+    def handle_keydown(self, event, running):
+        """Handle keyboard events based on game state."""
+        # Global keys
+        if event.key == pygame.K_f:
+            self.show_fps = not self.show_fps
+            return running
+
+        if self.game_state == GameState.MENU:
+            if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                self.game_state = GameState.LEVEL_SELECT
+
+        elif self.game_state == GameState.LEVEL_SELECT:
+            pass  # Level select only uses mouse/touch
+
+        elif self.game_state == GameState.PLAYING:
+            if event.key == pygame.K_ESCAPE or event.key == pygame.K_p:
+                if self.paused:
+                    self.paused = False
+                else:
+                    self.toggle_pause()
+
+        elif self.game_state == GameState.LEVEL_COMPLETE:
+            if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                # Go to next level
+                next_level = self.get_next_level()
+                if next_level:
+                    self.start_level(next_level)
+                else:
+                    self.game_state = GameState.LEVEL_SELECT
+            elif event.key == pygame.K_r:
+                self.game_state = GameState.LEVEL_SELECT
+
+        elif self.game_state == GameState.GAME_OVER:
+            if event.key == pygame.K_r:
+                self.start_level(self.current_level)
+            elif event.key == pygame.K_RETURN or event.key == pygame.K_ESCAPE:
+                self.game_state = GameState.LEVEL_SELECT
+
+        return running
+
+    def handle_mousedown(self, event, running):
+        """Handle mouse/touch events based on game state."""
+        pos = event.pos
+
+        if self.game_state == GameState.MENU:
+            if self.menu_screen.handle_click(pos):
+                self.game_state = GameState.LEVEL_SELECT
+
+        elif self.game_state == GameState.LEVEL_SELECT:
+            result = self.level_select_screen.handle_click(pos, self.unlocked_levels)
+            if result == 'back':
+                self.game_state = GameState.MENU
+            elif result:
+                self.start_level(result)
+
+        elif self.game_state == GameState.PLAYING:
+            if self.paused:
+                action = self.pause_menu.handle_click(pos)
+                if action == 'resume':
+                    self.paused = False
+                elif action == 'restart':
+                    self.start_level(self.current_level)
+                elif action == 'quit':
+                    self.game_state = GameState.LEVEL_SELECT
+            elif self.touch_controls.check_pause_tap(pos):
+                self.toggle_pause()
+
+        elif self.game_state == GameState.LEVEL_COMPLETE:
+            has_next = self.get_next_level() is not None
+            action = self.level_complete_screen.handle_click(pos, has_next)
+            if action == 'next':
+                next_level = self.get_next_level()
+                if next_level:
+                    self.start_level(next_level)
+            elif action == 'select':
+                self.game_state = GameState.LEVEL_SELECT
+
+        elif self.game_state == GameState.GAME_OVER:
+            if hasattr(self, 'retry_btn') and self.retry_btn.collidepoint(pos):
+                self.start_level(self.current_level)
+            elif hasattr(self, 'select_btn_gameover') and self.select_btn_gameover.collidepoint(pos):
+                self.game_state = GameState.LEVEL_SELECT
+
+        return running
 
 
 def main():

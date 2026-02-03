@@ -28,8 +28,9 @@ Thumbs.db
 *.log
 saves/
 
-# Personal testing docs (not for repo)
+# Personal docs (not for repo)
 TESTING_IPHONE.md
+SPRITE_LIST.md
 
 # Pygbag build output
 build/

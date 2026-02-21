@@ -11,15 +11,14 @@ Controls:
         F: Toggle FPS display
 
     Touch/Mouse:
-        Virtual joystick (left panel): Move ship
-        Fire button (right panel): Shoot
-        Pause button: Pause game
+        Pause button (right panel): Pause game
         Menu buttons: Navigate menus
 
 Game Flow:
     Main Menu -> Level Select -> Play Level -> Level Complete/Game Over -> Level Select
 """
 
+import asyncio
 import pygame
 import sys
 import random
@@ -34,8 +33,8 @@ SCREEN_HEIGHT = 450
 FPS = 60
 
 # Layout zones (10% - 80% - 10%)
-LEFT_PANEL_WIDTH = 80   # 10% for joystick + health bar
-RIGHT_PANEL_WIDTH = 80  # 10% for fire button
+LEFT_PANEL_WIDTH = 80   # 10% for health + ammo bars
+RIGHT_PANEL_WIDTH = 80  # 10% for pause button, progress, controls
 PLAY_AREA_X = LEFT_PANEL_WIDTH
 PLAY_AREA_WIDTH = SCREEN_WIDTH - LEFT_PANEL_WIDTH - RIGHT_PANEL_WIDTH  # 640px (80%)
 
@@ -52,6 +51,7 @@ BROWN = (139, 90, 43)
 DARK_BROWN = (101, 67, 33)
 GREEN = (50, 255, 50)
 DARK_GREEN = (30, 150, 30)
+CYAN = (0, 255, 255)
 PANEL_BG = (20, 20, 30)
 
 # Player settings
@@ -73,6 +73,7 @@ BULLET_WIDTH = 6
 BULLET_HEIGHT = 15
 BULLET_SPEED = 10
 BULLET_COOLDOWN = 15
+STARTING_AMMO = 30
 
 # Asteroid settings
 ASTEROID_SIZES = {
@@ -94,12 +95,6 @@ BARRICADE_HEIGHT = 16
 # Giant asteroid settings
 GIANT_ASTEROID_SIZE = 100
 GIANT_ASTEROID_HEALTH = 8
-
-# Touch control settings
-JOYSTICK_RADIUS = 30  # Smaller to fit in panel
-JOYSTICK_KNOB_RADIUS = 12
-JOYSTICK_DEAD_ZONE = 5
-TOUCH_BUTTON_ALPHA = 150
 
 # Invincibility after hit (frames)
 INVINCIBILITY_FRAMES = 60
@@ -170,6 +165,78 @@ class HealthBar:
         pygame.draw.rect(surface, WHITE, self.rect, self.border_width)
 
 
+class AmmoBar:
+    """Vertical ammo bar display."""
+
+    def __init__(self, x, y, width, height):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.border_width = 2
+        self.font = pygame.font.Font(None, 14)
+
+    def draw(self, surface, current_ammo, max_ammo):
+        """Draw the ammo bar."""
+        # Background
+        pygame.draw.rect(surface, DARK_GRAY, self.rect)
+
+        # Ammo fill (from bottom up)
+        ammo_ratio = max(0, current_ammo / max_ammo) if max_ammo > 0 else 0
+        fill_height = int((self.rect.height - self.border_width * 2) * ammo_ratio)
+        fill_rect = pygame.Rect(
+            self.rect.x + self.border_width,
+            self.rect.bottom - self.border_width - fill_height,
+            self.rect.width - self.border_width * 2,
+            fill_height
+        )
+
+        # Color based on ammo level
+        if ammo_ratio > 0.5:
+            color = CYAN
+        elif ammo_ratio > 0.25:
+            color = YELLOW
+        else:
+            color = RED
+
+        if fill_height > 0:
+            pygame.draw.rect(surface, color, fill_rect)
+
+        # Border
+        pygame.draw.rect(surface, WHITE, self.rect, self.border_width)
+
+        # Label
+        label = self.font.render("AMMO", True, WHITE)
+        label_x = self.rect.x + self.rect.width // 2 - label.get_width() // 2
+        surface.blit(label, (label_x, self.rect.y - label.get_height() - 1))
+
+
+class ControlsList:
+    """Static controls reference displayed in the right panel."""
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.font_header = pygame.font.Font(None, 18)
+        self.font_item = pygame.font.Font(None, 16)
+
+    def draw(self, surface):
+        """Draw the controls reference."""
+        lines = [
+            ("CONTROLS", self.font_header, WHITE),
+            ("", None, None),
+            ("\u2190\u2192  Move", self.font_item, LIGHT_GRAY),
+            ("SPC Shoot", self.font_item, LIGHT_GRAY),
+            (" P  Pause", self.font_item, LIGHT_GRAY),
+        ]
+        y = self.y
+        for text, font, color in lines:
+            if font is None:
+                y += 4
+                continue
+            rendered = font.render(text, True, color)
+            x = self.x + (RIGHT_PANEL_WIDTH - rendered.get_width()) // 2
+            surface.blit(rendered, (x, y))
+            y += rendered.get_height() + 3
+
+
 class ProgressTracker:
     """Vertical progress bar showing journey to space station."""
 
@@ -217,63 +284,6 @@ class ProgressTracker:
         surface.blit(text, (self.x + self.width // 2 - text.get_width() // 2, self.y + self.height + 2))
 
 
-class VirtualJoystick:
-    """A virtual joystick for touch/mouse control."""
-
-    def __init__(self, center_x, center_y):
-        self.center = pygame.math.Vector2(center_x, center_y)
-        self.knob_pos = pygame.math.Vector2(center_x, center_y)
-        self.active = False
-        self.value_x = 0
-
-    def update(self, mouse_pressed, mouse_pos):
-        """Update joystick based on input."""
-        mouse_vec = pygame.math.Vector2(mouse_pos)
-        distance_to_center = self.center.distance_to(mouse_vec)
-
-        if mouse_pressed:
-            if distance_to_center <= JOYSTICK_RADIUS * 2 or self.active:
-                self.active = True
-                offset = mouse_vec - self.center
-
-                if offset.length() > JOYSTICK_RADIUS:
-                    offset.scale_to_length(JOYSTICK_RADIUS)
-
-                self.knob_pos = self.center + offset
-
-                if abs(offset.x) > JOYSTICK_DEAD_ZONE:
-                    self.value_x = offset.x / JOYSTICK_RADIUS
-                else:
-                    self.value_x = 0
-        else:
-            self.active = False
-            self.knob_pos = self.center.copy()
-            self.value_x = 0
-
-    def draw(self, surface):
-        """Draw the joystick."""
-        # Outer ring
-        pygame.draw.circle(surface, GRAY, (int(self.center.x), int(self.center.y)),
-                          JOYSTICK_RADIUS, 2)
-
-        # Inner knob
-        knob_color = BLUE if self.active else DARK_GRAY
-        pygame.draw.circle(surface, knob_color,
-                          (int(self.knob_pos.x), int(self.knob_pos.y)),
-                          JOYSTICK_KNOB_RADIUS)
-        pygame.draw.circle(surface, WHITE,
-                          (int(self.knob_pos.x), int(self.knob_pos.y)),
-                          JOYSTICK_KNOB_RADIUS, 2)
-
-    @property
-    def moving_left(self):
-        return self.value_x < -0.3
-
-    @property
-    def moving_right(self):
-        return self.value_x > 0.3
-
-
 class TouchButton:
     """A touchable on-screen button."""
 
@@ -311,27 +321,9 @@ class TouchButton:
 
 
 class TouchControls:
-    """Manages all on-screen touch controls."""
+    """Manages on-screen touch controls (pause button only)."""
 
     def __init__(self):
-        # Common Y position for joystick and fire button (level with each other)
-        controls_y = SCREEN_HEIGHT - 80  # Near bottom but with some margin
-
-        # Joystick in left panel
-        self.joystick = VirtualJoystick(
-            LEFT_PANEL_WIDTH // 2,
-            controls_y
-        )
-
-        # Fire button in right panel (level with joystick)
-        fire_radius = 30
-        self.fire_btn = TouchButton(
-            SCREEN_WIDTH - RIGHT_PANEL_WIDTH // 2 - fire_radius,
-            controls_y - fire_radius,
-            fire_radius * 2, fire_radius * 2,
-            "FIRE", RED, radius=fire_radius
-        )
-
         # Pause button (top of right panel)
         pause_size = 30
         self.pause_btn = TouchButton(
@@ -341,36 +333,13 @@ class TouchControls:
             "||", GRAY
         )
 
-    def update(self, mouse_pressed, mouse_pos):
-        """Update controls based on input."""
-        self.joystick.update(mouse_pressed, mouse_pos)
-
-        if mouse_pressed:
-            self.fire_btn.pressed = self.fire_btn.check_press(mouse_pos)
-        else:
-            self.fire_btn.pressed = False
-
     def check_pause_tap(self, pos):
         """Check if pause button was tapped."""
         return self.pause_btn.check_press(pos)
 
     def draw(self, surface):
-        """Draw all touch controls."""
-        self.joystick.draw(surface)
-        self.fire_btn.draw(surface)
+        """Draw the pause button."""
         self.pause_btn.draw(surface)
-
-    @property
-    def moving_left(self):
-        return self.joystick.moving_left
-
-    @property
-    def moving_right(self):
-        return self.joystick.moving_right
-
-    @property
-    def firing(self):
-        return self.fire_btn.pressed
 
 
 class PauseMenu:
@@ -972,15 +941,21 @@ class Game:
         self.level_select_screen = LevelSelectScreen()
         self.level_complete_screen = LevelCompleteScreen()
 
-        # Health bar in left panel (above joystick)
-        health_bar_height = SCREEN_HEIGHT - 120  # Leave room for joystick
-        self.health_bar = HealthBar(10, 10, LEFT_PANEL_WIDTH - 20, health_bar_height)
+        # Health bar and ammo bar in left panel
+        self.health_bar = HealthBar(10, 10, 25, SCREEN_HEIGHT - 20)
+        self.ammo_bar = AmmoBar(45, 10, 25, SCREEN_HEIGHT - 20)
 
-        # Progress tracker in right panel (between pause button and fire button)
+        # Progress tracker in right panel (below pause button)
         tracker_x = SCREEN_WIDTH - RIGHT_PANEL_WIDTH // 2 - 10
         tracker_y = 50  # Below pause button
-        tracker_height = 130  # Space between pause and fire buttons
+        tracker_height = 130
         self.progress_tracker = ProgressTracker(tracker_x, tracker_y, tracker_height)
+
+        # Controls reference list in right panel (below progress tracker)
+        self.controls_list = ControlsList(SCREEN_WIDTH - RIGHT_PANEL_WIDTH, tracker_y + tracker_height + 30)
+
+        # Ammo (persists across levels; resets to STARTING_AMMO on new game)
+        self.ammo = STARTING_AMMO
 
         # Game state
         self.game_state = GameState.MENU
@@ -1154,10 +1129,6 @@ class Game:
 
         keys = pygame.key.get_pressed()
 
-        mouse_pressed = pygame.mouse.get_pressed()[0]
-        mouse_pos = pygame.mouse.get_pos()
-        self.touch_controls.update(mouse_pressed, mouse_pos)
-
         # Handle docking sequence (auto-pilot)
         if self.docking:
             # Auto-fly player toward station docking port
@@ -1185,14 +1156,11 @@ class Game:
                 self.complete_level()
             return
 
-        self.player.update(
-            keys,
-            touch_left=self.touch_controls.moving_left,
-            touch_right=self.touch_controls.moving_right
-        )
+        self.player.update(keys)
 
-        shooting = keys[pygame.K_SPACE] or self.touch_controls.firing
-        if shooting and self.player.can_shoot():
+        shooting = keys[pygame.K_SPACE]
+        if shooting and self.player.can_shoot() and self.ammo > 0:
+            self.ammo -= 1
             bullet = self.player.shoot()
             self.bullets.add(bullet)
             self.all_sprites.add(bullet)
@@ -1298,8 +1266,9 @@ class Game:
         else:
             self.screen.blit(self.player.image, self.player.rect)
 
-        # Draw health bar
+        # Draw health and ammo bars
         self.health_bar.draw(self.screen, self.health, PLAYER_MAX_HEALTH)
+        self.ammo_bar.draw(self.screen, self.ammo, STARTING_AMMO)
 
         # Draw score (top left of play area)
         score_text = self.font_score.render(f"${self.score}", True, GREEN)
@@ -1314,9 +1283,11 @@ class Game:
         progress = min(1.0, self.level_timer / self.level_duration)
         self.progress_tracker.draw(self.screen, progress)
 
-        # Draw touch controls (only during active play)
-        if self.game_state == GameState.PLAYING and not self.paused:
-            self.touch_controls.draw(self.screen)
+        # Draw controls reference
+        self.controls_list.draw(self.screen)
+
+        # Draw touch controls (pause button only)
+        self.touch_controls.draw(self.screen)
 
         # Draw FPS
         if self.show_fps:
@@ -1370,7 +1341,7 @@ class Game:
         self.screen.blit(select_text, (self.select_btn_gameover.centerx - select_text.get_width() // 2,
                                        self.select_btn_gameover.centery - select_text.get_height() // 2))
 
-    def run(self):
+    async def run(self):
         """Main game loop."""
         running = True
         while running:
@@ -1387,9 +1358,9 @@ class Game:
             self.update()
             self.draw()
             self.clock.tick(FPS)
+            await asyncio.sleep(0)
 
         pygame.quit()
-        sys.exit()
 
     def handle_keydown(self, event, running):
         """Handle keyboard events based on game state."""
@@ -1437,6 +1408,7 @@ class Game:
 
         if self.game_state == GameState.MENU:
             if self.menu_screen.handle_click(pos):
+                self.ammo = STARTING_AMMO
                 self.game_state = GameState.LEVEL_SELECT
 
         elif self.game_state == GameState.LEVEL_SELECT:
@@ -1477,11 +1449,10 @@ class Game:
         return running
 
 
-def main():
+async def main():
     """Entry point."""
     game = Game()
-    game.run()
+    await game.run()
 
 
-if __name__ == "__main__":
-    main()
+asyncio.run(main())
